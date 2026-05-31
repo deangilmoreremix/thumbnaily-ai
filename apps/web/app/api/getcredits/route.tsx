@@ -1,23 +1,10 @@
-import { auth } from "@/lib/auth"
-import db from "@repo/db"
-import { NextResponse } from "next/server"
+import { NextResponse } from "next/server";
+import { supabaseAdmin } from "@/lib/supabase";
 
-export async function GET(){
-    const session = await auth();
-    
-    if(!session || !session.user.email){
-        return NextResponse.json({
-            error:true,
-            message:"Not Authenticated"
-        })
-    }
-    const user = await db.user.findUnique({
-        where:{
-            email:session.user.email
-        }
-    })
-
-    return NextResponse.json({
-        credits:user?.credits
-    })
+export async function GET() {
+  // For anonymous usage, return a default credit value
+  // In production, you might want to track usage by IP or implement anonymous credits
+  return NextResponse.json({
+    credits: 100 // Default credits for anonymous users
+  });
 }
