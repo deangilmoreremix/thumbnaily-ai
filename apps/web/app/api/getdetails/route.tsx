@@ -1,29 +1,35 @@
+// API endpoint for getting thumbnail details
 import { NextRequest, NextResponse } from "next/server";
-import db from "@repo/db"
+import { supabaseAdmin } from "@/lib/supabase";
 
-export async function POST(req:NextRequest){
-    
-    const {thumbnailid} = await req.json();
-    
-    const data = await db.thumbnails.findUnique({
-        where:{
-            id:thumbnailid
-        },
-        include: {
-            referenceImages: true
-        }
-    });
+export async function POST(req: NextRequest) {
+  const { thumbnailid } = await req.json();
 
-    if(!data){
-        return NextResponse.json({
-            error:"Data not found."
-        })
-    }
+  // Get thumbnail with creator info
+  const { data: thumbnail } = await supabaseAdmin
+    .from('thumbnails')
+    .select(`*, users!inner(name, avatar)`)
+    .eq('id', thumbnailid)
+    .single();
 
-    const user = await db.user.findUnique({
-        where:{
-            id:data?.creatorID
-        }
-    })
-    return(NextResponse.json({data,user}))
+  if (!thumbnail) {
+    return NextResponse.json({
+      error: "Data not found."
+    }, { status: 404 });
+  }
+
+  // Transform to match expected format
+  const transformedData = {
+    data: {
+      prompt: thumbnail.prompt,
+      link: thumbnail.link,
+      createdAt: thumbnail.created_at,
+    },
+    user: {
+      name: thumbnail.users?.name || 'Anonymous',
+      avatar: thumbnail.users?.avatar || '',
+    },
+  };
+
+  return NextResponse.json(transformedData);
 }
