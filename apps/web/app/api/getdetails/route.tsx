@@ -5,14 +5,14 @@ import { supabaseAdmin } from "@/lib/supabase";
 export async function POST(req: NextRequest) {
   const { thumbnailid } = await req.json();
 
-  // Get thumbnail with creator info
-  const { data: thumbnail } = await supabaseAdmin
+  // Get thumbnail without user join for anonymous usage
+  const { data: thumbnail, error } = await supabaseAdmin
     .from('thumbnails')
-    .select(`*, users!inner(name, avatar)`)
+    .select('*')
     .eq('id', thumbnailid)
     .single();
 
-  if (!thumbnail) {
+  if (error || !thumbnail) {
     return NextResponse.json({
       error: "Data not found."
     }, { status: 404 });
@@ -22,12 +22,12 @@ export async function POST(req: NextRequest) {
   const transformedData = {
     data: {
       prompt: thumbnail.prompt,
-      link: thumbnail.link,
+      link: thumbnail.image_url || '',
       createdAt: thumbnail.created_at,
     },
     user: {
-      name: thumbnail.users?.name || 'Anonymous',
-      avatar: thumbnail.users?.avatar || '',
+      name: 'Anonymous',
+      avatar: '',
     },
   };
 

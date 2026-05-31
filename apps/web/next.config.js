@@ -1,13 +1,3 @@
-const r2PublicHostname = (() => {
-  const publicUrl = process.env.R2_PUBLIC_BASE_URL;
-  if (!publicUrl) return null;
-  try {
-    return new URL(publicUrl).hostname;
-  } catch {
-    return null;
-  }
-})();
-
 const nextConfig = {
   allowedDevOrigins: [
     'http://165.22.214.246',
@@ -22,15 +12,26 @@ const nextConfig = {
         hostname: 'thumbnaily-storage.s3.ap-south-1.amazonaws.com',
         pathname: '**',
       },
-      ...(r2PublicHostname
-        ? [
-            {
-              protocol: 'https',
-              hostname: r2PublicHostname,
-              pathname: '**',
-            },
-          ]
-        : []),
+      {
+        protocol: 'https',
+        hostname: 'bzxohkrxcwodllketcpz.supabase.co',
+        pathname: '**',
+      },
+      {
+        protocol: 'https',
+        hostname: '*.supabase.co',
+        pathname: '**',
+      },
+      {
+        protocol: 'https',
+        hostname: 'openrouter.ai',
+        pathname: '**',
+      },
+      {
+        protocol: 'https',
+        hostname: 'cdn.opengraph.com',
+        pathname: '**',
+      },
       {
         protocol: 'https',
         hostname: 'lh3.googleusercontent.com',
@@ -44,11 +45,6 @@ const nextConfig = {
       {
         protocol: 'https',
         hostname: 'i.ytimg.com',
-        pathname: '**'
-      },
-      {
-        protocol: 'https',
-        hostname: '**.r2.dev',
         pathname: '**'
       }
     ],

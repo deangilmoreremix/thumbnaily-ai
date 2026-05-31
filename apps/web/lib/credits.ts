@@ -1,41 +1,10 @@
-import db from "@repo/db"
+// Credits module - unused for anonymous mode
+// Kept for reference if authentication is added later
 
-export async function reduceCredit({email,cost}:{email:string,cost:number}){    
-    const user = await db.user.findUnique({
-        where:{
-            email:email
-        }
-    })
-    if(!user){
-        return;
-    }
-    
-    await db.user.update({
-        where:{
-            email:email
-        },
-        data:{
-            credits:user?.credits-cost
-        }
-    })
+export async function reduceCredit(_params: { email: string; cost: number }): Promise<void> {
+  // No-op for anonymous mode
 }
 
-export async function addCredit({email,add}:{email:string,add:number}){    
-    const user = await db.user.findUnique({
-        where:{
-            email:email
-        }
-    })
-    if(!user){
-        return;
-    }
-    
-    await db.user.update({
-        where:{
-            email:email
-        },
-        data:{
-            credits:user?.credits+add
-        }
-    })
+export async function addCredit(_params: { email: string; add: number }): Promise<void> {
+  // No-op for anonymous mode
 }

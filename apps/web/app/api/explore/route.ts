@@ -8,7 +8,7 @@ export async function GET(req: NextRequest) {
 
   let query = supabaseAdmin
     .from('thumbnails')
-    .select(`*, thumbnail_reference_images(*)`)
+    .select('*')
     .eq('is_public', true)
     .order('created_at', { ascending: false })
     .limit(limit + 1);
@@ -21,7 +21,9 @@ export async function GET(req: NextRequest) {
   const { data: thumbnails, error } = await query;
 
   if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    // Return empty array if table doesn't exist yet
+    console.error("Database error:", error.message);
+    return NextResponse.json({ data: [], nextCursor: null });
   }
 
   const hasMore = thumbnails && thumbnails.length > limit;
@@ -32,10 +34,9 @@ export async function GET(req: NextRequest) {
   const transformedData = data?.map((thumb) => ({
     id: thumb.id,
     prompt: thumb.prompt,
-    link: thumb.link,
+    link: thumb.image_url || thumb.link,
     isPublic: thumb.is_public,
     createdAt: thumb.created_at,
-    referenceImages: thumb.thumbnail_reference_images || [],
   })) || [];
 
   return NextResponse.json({ data: transformedData, nextCursor });

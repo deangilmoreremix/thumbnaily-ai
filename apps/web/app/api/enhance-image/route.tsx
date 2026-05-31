@@ -1,6 +1,6 @@
-// API endpoint for image enhancement features
+// API endpoint for image enhancement using OpenAI image API
 import { NextRequest, NextResponse } from "next/server";
-import { muApiClient, MuApiImageResponse } from "@/lib/muapi";
+import OpenAI from "openai";
 import { supabaseAdmin } from "@/lib/supabase";
 
 interface ProgressData {
@@ -22,7 +22,91 @@ const updateProgress = (
   progressStore.set(progressId, { step, progress, imageUrl, error });
 };
 
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+  baseURL: "https://openrouter.ai/api/v1",
+});
+
 type EnhancementType = 'upscale' | 'background_removal' | 'face_enhance' | 'ghibli_style' | 'outpaint';
+
+function getEnhancementPrompt(enhancementType: EnhancementType, userPrompt?: string): string {
+  const prompts: Record<EnhancementType, string> = {
+    upscale: "Upscale this image to higher resolution while maintaining quality and detail",
+    background_removal: "Remove the background from this image, keeping only the subject with transparency",
+    face_enhance: "Enhance facial features in this image, making them clearer and more detailed",
+    ghibli_style: "Transform this image into Studio Ghibli style artwork - vibrant colors, soft lighting, whimsical and magical",
+    outpaint: userPrompt || "Extend the image beyond its original boundaries creatively",
+  };
+  return prompts[enhancementType] || prompts.upscale;
+}
+
+async function enhanceImage(imageUrl: string, enhancementType: EnhancementType, prompt?: string): Promise<string> {
+  // Fetch the image as a buffer
+  const imageResponse = await fetch(imageUrl);
+  if (!imageResponse.ok) {
+    throw new Error(`Failed to fetch image: ${imageResponse.statusText}`);
+  }
+  const imageBuffer = await imageResponse.arrayBuffer();
+  const imageBase64 = Buffer.from(imageBuffer).toString('base64');
+
+  const enhancementPrompt = getEnhancementPrompt(enhancementType, prompt);
+
+  const response = await openai.chat.completions.create({
+    model: "openai/gpt-5-image",
+    modalities: ["image", "text"],
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "image_url",
+            image_url: {
+              url: `data:image/png;base64,${imageBase64}`,
+            },
+          },
+          {
+            type: "text",
+            text: enhancementPrompt,
+          },
+        ],
+      },
+    ],
+  });
+
+  // Extract image URL from response - images are in message.images array (base64 data URLs)
+  const imageUrlResult = response.choices[0]?.message?.images?.[0]?.image_url?.url;
+
+  if (!imageUrlResult) {
+    throw new Error("Image enhancement failed - no image returned");
+  }
+
+  // If it's a base64 data URL, convert to a usable URL by uploading to Supabase
+  if (imageUrlResult.startsWith('data:')) {
+    // Extract the base64 data
+    const base64Data = imageUrlResult.split(',')[1];
+    const buffer = Buffer.from(base64Data, 'base64');
+    
+    // Upload to Supabase
+    const key = `thumbnails/enhanced/${Date.now().toString()}_${Math.floor(Math.random() * 1000)}.png`;
+    const { error: uploadError } = await supabaseAdmin.storage
+      .from('thumbnails')
+      .upload(key, buffer, {
+        contentType: 'image/png',
+      });
+
+    if (uploadError) {
+      throw new Error(`Failed to upload enhanced image: ${uploadError.message}`);
+    }
+
+    const { data: urlData } = supabaseAdmin.storage
+      .from('thumbnails')
+      .getPublicUrl(key);
+
+    return urlData.publicUrl;
+  }
+
+  return imageUrlResult;
+}
 
 export async function POST(req: NextRequest) {
   const progressId = Math.random().toString(36).substring(7);
@@ -51,37 +135,9 @@ export async function POST(req: NextRequest) {
       try {
         updateProgress(progressId, `Applying ${enhancementType} enhancement`, 30);
 
-        const result = await muApiClient.enhanceImage(imageUrl, enhancementType, prompt);
+        const resultUrl = await enhanceImage(imageUrl, enhancementType, prompt);
 
-        if (!result || !('images' in result) || !result.images?.[0]?.url) {
-          throw new Error("Enhancement failed");
-        }
-
-        updateProgress(progressId, "Downloading enhanced image", 60);
-        const imageResponse = await fetch(result.images[0].url);
-        if (!imageResponse.ok) {
-          throw new Error(`Failed to download enhanced image: ${imageResponse.statusText}`);
-        }
-        const imageBuffer = await imageResponse.arrayBuffer();
-
-        updateProgress(progressId, "Uploading to storage", 80);
-
-        const key = `thumbnails/enhanced/${Date.now().toString()}_${Math.floor(Math.random() * 1000)}.png`;
-        const { error: uploadError } = await supabaseAdmin.storage
-          .from('thumbnails')
-          .upload(key, Buffer.from(imageBuffer), {
-            contentType: 'image/png',
-          });
-
-        if (uploadError) {
-          throw new Error(`Upload failed: ${uploadError.message}`);
-        }
-
-        const { data: publicUrlData } = supabaseAdmin.storage
-          .from('thumbnails')
-          .getPublicUrl(key);
-
-        updateProgress(progressId, "Complete", 100, publicUrlData.publicUrl);
+        updateProgress(progressId, "Complete", 100, resultUrl);
       } catch (e: unknown) {
         const errorMessage = e instanceof Error ? e.message : "Enhancement failed";
         updateProgress(progressId, "Error", 100, undefined, errorMessage);

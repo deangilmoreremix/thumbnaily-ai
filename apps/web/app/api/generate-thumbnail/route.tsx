@@ -1,20 +1,17 @@
-// api/generate-thumbnail/route.ts
+// API endpoint for thumbnail generation using OpenAI image API via OpenRouter
 import { NextRequest, NextResponse } from "next/server";
+import OpenAI from "openai";
 import { enhancePrompt } from "@/lib/enhancePrompt";
-import { muApiClient, MuApiImageResponse, MuApiVideoResponse } from "@/lib/muapi";
 import { supabaseAdmin } from "@/lib/supabase";
 
 interface ProgressData {
   step: string;
   progress: number;
   imageUrl?: string;
-  videoUrl?: string;
   error?: string;
-  generationType?: 'image' | 'video';
 }
 
 const progressStore = new Map<string, ProgressData>();
-const BUCKET_NAME = 'thumbnails';
 
 const updateProgress = (
   progressId: string,
@@ -29,13 +26,58 @@ const updateProgress = (
   } as ProgressData);
 };
 
+const BUCKET_NAME = 'thumbnails';
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+  baseURL: "https://openrouter.ai/api/v1",
+});
+
+async function generateImage(prompt: string): Promise<Buffer> {
+  const response = await openai.chat.completions.create({
+    model: "openai/gpt-5-image",
+    modalities: ["image", "text"],
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: prompt,
+          },
+        ],
+      },
+    ],
+  });
+
+  // Extract image URL from response (images are returned as base64 data URLs)
+  const imageUrl = response.choices[0]?.message?.images?.[0]?.image_url?.url;
+
+  if (!imageUrl) {
+    throw new Error("Image generation failed - no image returned");
+  }
+
+  // If it's a base64 data URL, decode it to get the buffer
+  if (imageUrl.startsWith('data:')) {
+    const base64Data = imageUrl.split(',')[1];
+    return Buffer.from(base64Data, 'base64');
+  }
+
+  // Otherwise fetch the image from URL
+  const mediaResponse = await fetch(imageUrl);
+  if (!mediaResponse.ok) {
+    throw new Error(`Failed to download generated image: ${mediaResponse.statusText}`);
+  }
+  
+  return Buffer.from(await mediaResponse.arrayBuffer());
+}
+
 export async function POST(req: NextRequest) {
   const progressId = Math.random().toString(36).substring(7);
   updateProgress(progressId, "Initializing", 0);
 
   try {
-    const { basicPrompt, image_url, image_urls, isPublic, generationType = 'image' } = await req.json();
-    const publicFlag = typeof isPublic === "boolean" ? isPublic : true;
+    const { basicPrompt, image_url, image_urls, isPublic } = await req.json();
 
     // Normalise image URLs: prefer the array, fall back to single, default empty
     const imageUrls: string[] = Array.isArray(image_urls)
@@ -80,73 +122,18 @@ export async function POST(req: NextRequest) {
         const finalPrompt = `[Style: ${style || 'cinematic'}, Mood: ${mood || 'dramatic'}] ${enhancedContent}`;
         updateProgress(progressId, "Prompt enhanced", 35);
 
-        updateProgress(progressId, "Initializing AI generation", 45);
+        updateProgress(progressId, "Generating image", 50);
 
-        let result: MuApiImageResponse | MuApiVideoResponse;
-        let fileExtension = '.png';
-        let contentType = 'image/png';
+        const mediaBuffer = await generateImage(finalPrompt);
 
-        if (generationType === 'video') {
-          updateProgress(progressId, "Generating video", 50);
-          result = await muApiClient.generateVideo({
-            prompt: finalPrompt,
-            duration: 5,
-            width: 1024,
-            height: 576,
-            output_format: 'mp4',
-          }) as MuApiVideoResponse;
-          fileExtension = '.mp4';
-          contentType = 'video/mp4';
-        } else {
-          updateProgress(progressId, "Generating image", 50);
-          
-          if (imageUrls.length > 0) {
-            result = await muApiClient.generateImageWithReference(
-              finalPrompt,
-              imageUrls,
-              { width: 1024, height: 576, steps: 30, output_format: 'png' }
-            ) as MuApiImageResponse;
-          } else {
-            result = await muApiClient.generateImage({
-              prompt: finalPrompt,
-              width: 1024,
-              height: 576,
-              steps: 30,
-              output_format: 'png',
-            }) as MuApiImageResponse;
-          }
-        }
-
-        if (generationType === 'video') {
-          if (!result || !(result as MuApiVideoResponse).video_url) {
-            throw new Error("Video generation failed or returned no output URL");
-          }
-        } else {
-          if (!result || !(result as MuApiImageResponse).images?.[0]?.url) {
-            throw new Error("Image generation failed or returned no output URL");
-          }
-        }
-
-        const outputUrl = generationType === 'video' 
-          ? (result as MuApiVideoResponse).video_url! 
-          : ((result as MuApiImageResponse).images![0] as { url: string }).url;
-        updateProgress(progressId, "AI generation complete", 75);
-
-        updateProgress(progressId, "Downloading generated content", 80);
-        const mediaResponse = await fetch(outputUrl);
-        if (!mediaResponse.ok) {
-          throw new Error(`Failed to download generated content: ${mediaResponse.statusText}`);
-        }
-        const mediaBuffer = await mediaResponse.arrayBuffer();
-
-        updateProgress(progressId, "Uploading to cloud storage", 85);
+        updateProgress(progressId, "Uploading to cloud storage", 80);
         
-        const key = `thumbnails/generations/${Date.now().toString()}_${Math.floor(Math.random() * 1000)}${fileExtension}`;
+        const key = `thumbnails/generations/${Date.now().toString()}_${Math.floor(Math.random() * 1000)}.png`;
         
         const { error: uploadError } = await supabaseAdmin.storage
           .from(BUCKET_NAME)
-          .upload(key, Buffer.from(mediaBuffer), {
-            contentType,
+          .upload(key, mediaBuffer, {
+            contentType: 'image/png',
             upsert: false,
           });
 
@@ -160,10 +147,7 @@ export async function POST(req: NextRequest) {
 
         const finalUrl = publicUrlData.publicUrl;
         updateProgress(progressId, "Cloud upload complete", 90);
-        updateProgress(progressId, "Complete", 100, generationType === 'video' 
-          ? { videoUrl: finalUrl, generationType } 
-          : { imageUrl: finalUrl, generationType: 'image' }
-        );
+        updateProgress(progressId, "Complete", 100, { imageUrl: finalUrl });
         console.log("Done");
       } catch (e: unknown) {
         console.error("Background generation error:", e);

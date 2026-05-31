@@ -1,38 +1,11 @@
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+// API endpoint using Supabase Storage for direct uploads
 import { NextRequest, NextResponse } from "next/server";
+import { supabaseAdmin } from "@/lib/supabase";
 
-const getR2Config = () => {
-  const accountId = process.env.R2_ACCOUNT_ID;
-  const accessKeyId = process.env.R2_ACCESS_KEY_ID;
-  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
-  const bucketName = process.env.R2_BUCKET_NAME;
-  const publicBaseUrl = process.env.R2_PUBLIC_BASE_URL;
-
-  if (!accountId || !accessKeyId || !secretAccessKey || !bucketName || !publicBaseUrl) {
-    throw new Error(
-      "Missing one or more R2 env vars: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME, R2_PUBLIC_BASE_URL"
-    );
-  }
-
-  return {
-    bucketName,
-    publicBaseUrl: publicBaseUrl.replace(/\/+$/, ""),
-    client: new S3Client({
-      region: "auto",
-      endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
-      forcePathStyle: true,
-      credentials: {
-        accessKeyId,
-        secretAccessKey,
-      },
-    }),
-  };
-};
+const BUCKET_NAME = 'thumbnails';
 
 export async function POST(request: NextRequest) {
   try {
-    const { client, bucketName, publicBaseUrl } = getR2Config();
     const { fileName, fileType, fileSize } = await request.json();
 
     if (
@@ -71,22 +44,31 @@ export async function POST(request: NextRequest) {
     };
 
     const fileExtension = getFileExtension(fileName, fileType);
-    const key = `thumbnails/uploads/${Math.floor(Math.random() * 1000) + Date.now().toString()}.${fileExtension}`;
-    
-    const cmd = new PutObjectCommand({
-      Bucket: bucketName,
-      Key: key, 
-      ContentType: fileType,
-    });
+    const path = `thumbnails/uploads/${Math.floor(Math.random() * 1000) + Date.now().toString()}.${fileExtension}`;
 
-    const signedUrl = await getSignedUrl(client, cmd, { expiresIn: 3600 });
-    const fileUrl = `${publicBaseUrl}/${key}`;
+    // Generate a signed upload URL using Supabase admin
+    const { data: signedUrlData, error: signedUrlError } = await supabaseAdmin.storage
+      .from(BUCKET_NAME)
+      .createSignedUploadUrl(path, {
+        contentType: fileType,
+      });
 
-    return NextResponse.json({ signedUrl, fileUrl, key });
-  } catch (error) {
-    console.error('Error generating presigned URL:', error);
+    if (signedUrlError) {
+      throw new Error(signedUrlError.message);
+    }
+
+    const fileUrl = `https://bzxohkrxcwodllketcpz.supabase.co/storage/v1/object/public/${BUCKET_NAME}/${path}`;
+
     return NextResponse.json({ 
-      error: 'Failed to generate presigned URL', 
+      signedUrl: signedUrlData.signedUrl,
+      fileUrl: fileUrl, 
+      path,
+      token: signedUrlData.token,
+    });
+  } catch (error) {
+    console.error('Error processing upload request:', error);
+    return NextResponse.json({ 
+      error: 'Failed to process upload request', 
       details: error instanceof Error ? error.message : 'Unknown error' 
     }, { status: 500 });
   }

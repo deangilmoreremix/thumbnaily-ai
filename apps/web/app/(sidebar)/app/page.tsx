@@ -3,6 +3,8 @@
 import axios from "axios";
 import { useRef, useState, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   ImagePlus,
   ArrowUp,
@@ -476,6 +478,171 @@ export default function GenerationPage() {
             </p>
           )}
         </div>
+
+        {/* Form */}
+        <div className="space-y-4">
+          <div>
+            <label className="text-sm font-medium mb-2 block">
+              Video Title
+            </label>
+            <Input
+              placeholder="Enter video title..."
+              value={videoTitle}
+              onChange={(e) => setVideoTitle(e.target.value)}
+              disabled={loading || uploading}
+            />
+          </div>
+
+          <div>
+            <label className="text-sm font-medium mb-2 block">
+              Prompt
+            </label>
+            <Textarea
+              placeholder="Describe what you want in the thumbnail..."
+              value={externalPrompt}
+              onChange={(e) => setExternalPrompt(e.target.value)}
+              rows={4}
+              disabled={loading || uploading}
+            />
+          </div>
+
+          {/* Image Upload */}
+          <div>
+            <label className="text-sm font-medium mb-2 block">
+              Reference Images (optional)
+            </label>
+            
+            {selectedFiles.length > 0 && (
+              <div className="flex flex-wrap gap-2 mb-2">
+                {previewUrls.map((url, index) => (
+                  <div key={index} className="relative">
+                    <Image
+                      src={url}
+                      alt={`Preview ${index + 1}`}
+                      width={80}
+                      height={80}
+                      className="rounded-md object-cover"
+                    />
+                    <button
+                      onClick={clearImages}
+                      className="absolute -top-1 -right-1 bg-destructive text-destructive-foreground rounded-full p-0.5"
+                      disabled={loading || uploading}
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              className={`border-2 border-dashed rounded-lg p-4 text-center transition-colors ${
+                isDragging
+                  ? "border-primary bg-muted/50"
+                  : "border-border hover:border-border/80"
+              }`}
+            >
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept={ALLOWED_TYPES.join(",")}
+                multiple
+                onChange={handleFileChange}
+                className="hidden"
+                disabled={loading || uploading}
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={loading || uploading}
+                className="flex items-center justify-center gap-2 w-full"
+              >
+                <ImagePlus size={16} />
+                <span>Upload reference images</span>
+              </button>
+            </div>
+            
+            {uploadError && (
+              <p className="text-sm text-destructive mt-2">{uploadError}</p>
+            )}
+          </div>
+
+          {/* Visibility Toggle */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsPublic(!isPublic)}
+              className="flex items-center gap-1 text-sm"
+              disabled={loading || uploading}
+            >
+              {isPublic ? <Globe size={16} /> : <Lock size={16} />}
+              <span>{isPublic ? "Public" : "Private"}</span>
+            </button>
+          </div>
+
+          {/* Generate Button */}
+          <Button
+            onClick={handleClick}
+            disabled={loading || uploading}
+            className="w-full"
+          >
+            {loading ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                Generating...
+              </>
+            ) : (
+              <>
+                <ArrowUp size={16} className="mr-2" />
+                Generate Thumbnail
+              </>
+            )}
+          </Button>
+        </div>
+
+        {/* Progress */}
+        {progressState.step && (
+          <div className="mt-6 p-4 bg-muted/50 rounded-lg">
+            <div className="flex items-center gap-2 mb-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="text-sm font-medium">{progressState.step}</span>
+            </div>
+            <div className="w-full bg-border rounded-full h-2">
+              <div 
+                className="bg-primary h-2 rounded-full transition-all" 
+                style={{ width: `${progressState.progress}%` }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Generated Images */}
+        {images.length > 0 && (
+          <div className="mt-8">
+            <h2 className="text-lg font-semibold mb-4">Generated Thumbnails</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {images.map((image, index) => (
+                <div key={index} className="relative rounded-lg overflow-hidden border">
+                  <Image
+                    src={image}
+                    alt={`Generated ${index + 1}`}
+                    width={1024}
+                    height={576}
+                    className="w-full"
+                  />
+                  <Link
+                    href={image}
+                    target="_blank"
+                    className="absolute top-2 right-2 bg-black/50 text-white p-1.5 rounded-full"
+                  >
+                    <Download size={16} />
+                  </Link>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

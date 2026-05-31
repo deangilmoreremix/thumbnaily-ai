@@ -1,0 +1,12 @@
+[build]
+  publish = "apps/web/out"
+  command = "cd apps/web && npm run build"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+[template.environment]
+  NEXT_PUBLIC_SUPABASE_URL = "https://bzxohkrxcwodllketcpz.supabase.co"
+  NEXT_PUBLIC_SUPABASE_ANON_KEY = "Your Supabase anon key"
+  SUPABASE_SERVICE_ROLE_KEY = "Your Supabase service role key"
+  OPENAI_API_KEY = "Your OpenAI API key"
