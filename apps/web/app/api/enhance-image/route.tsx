@@ -24,7 +24,6 @@ const updateProgress = (
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
-  baseURL: "https://openrouter.ai/api/v1",
 });
 
 type EnhancementType = 'upscale' | 'background_removal' | 'face_enhance' | 'ghibli_style' | 'outpaint';
@@ -51,61 +50,19 @@ async function enhanceImage(imageUrl: string, enhancementType: EnhancementType, 
 
   const enhancementPrompt = getEnhancementPrompt(enhancementType, prompt);
 
-  const response = await openai.chat.completions.create({
-    model: "openai/gpt-5-image",
-    modalities: ["image", "text"],
-    messages: [
-      {
-        role: "user",
-        content: [
-          {
-            type: "image_url",
-            image_url: {
-              url: `data:image/png;base64,${imageBase64}`,
-            },
-          },
-          {
-            type: "text",
-            text: enhancementPrompt,
-          },
-        ],
-      },
-    ],
+  const response = await openai.images.edit({
+    model: "gpt-image",
+    image: imageBase64,
+    prompt: enhancementPrompt,
+    n: 1,
+    size: "1024x576",
   });
 
-  // Extract image URL from response - images are in message.images array (base64 data URLs)
-  const imageUrlResult = response.choices[0]?.message?.images?.[0]?.image_url?.url;
-
-  if (!imageUrlResult) {
-    throw new Error("Image enhancement failed - no image returned");
+  if (!response.data?.[0]?.url) {
+    throw new Error("Image enhancement failed - no URL returned");
   }
 
-  // If it's a base64 data URL, convert to a usable URL by uploading to Supabase
-  if (imageUrlResult.startsWith('data:')) {
-    // Extract the base64 data
-    const base64Data = imageUrlResult.split(',')[1];
-    const buffer = Buffer.from(base64Data, 'base64');
-    
-    // Upload to Supabase
-    const key = `thumbnails/enhanced/${Date.now().toString()}_${Math.floor(Math.random() * 1000)}.png`;
-    const { error: uploadError } = await supabaseAdmin.storage
-      .from('thumbnails')
-      .upload(key, buffer, {
-        contentType: 'image/png',
-      });
-
-    if (uploadError) {
-      throw new Error(`Failed to upload enhanced image: ${uploadError.message}`);
-    }
-
-    const { data: urlData } = supabaseAdmin.storage
-      .from('thumbnails')
-      .getPublicUrl(key);
-
-    return urlData.publicUrl;
-  }
-
-  return imageUrlResult;
+  return response.data[0].url;
 }
 
 export async function POST(req: NextRequest) {
@@ -137,7 +94,31 @@ export async function POST(req: NextRequest) {
 
         const resultUrl = await enhanceImage(imageUrl, enhancementType, prompt);
 
-        updateProgress(progressId, "Complete", 100, resultUrl);
+        updateProgress(progressId, "Downloading enhanced image", 60);
+        const imageResponse = await fetch(resultUrl);
+        if (!imageResponse.ok) {
+          throw new Error(`Failed to download enhanced image: ${imageResponse.statusText}`);
+        }
+        const imageBuffer = await imageResponse.arrayBuffer();
+
+        updateProgress(progressId, "Uploading to storage", 80);
+
+        const key = `thumbnails/enhanced/${Date.now().toString()}_${Math.floor(Math.random() * 1000)}.png`;
+        const { error: uploadError } = await supabaseAdmin.storage
+          .from('thumbnails')
+          .upload(key, Buffer.from(imageBuffer), {
+            contentType: 'image/png',
+          });
+
+        if (uploadError) {
+          throw new Error(`Upload failed: ${uploadError.message}`);
+        }
+
+        const { data: publicUrlData } = supabaseAdmin.storage
+          .from('thumbnails')
+          .getPublicUrl(key);
+
+        updateProgress(progressId, "Complete", 100, publicUrlData.publicUrl);
       } catch (e: unknown) {
         const errorMessage = e instanceof Error ? e.message : "Enhancement failed";
         updateProgress(progressId, "Error", 100, undefined, errorMessage);

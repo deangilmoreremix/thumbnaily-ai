@@ -32,18 +32,6 @@ function Navbar() {
             >
               Home
             </Link>
-            <Link
-              href="/pricing"
-              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Pricing
-            </Link>
-            <Link
-              href="/contact"
-              className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Contact
-            </Link>
             <a
               href="https://github.com/justanuragmaurya/thumbnaily-ai"
               target="_blank"
@@ -81,18 +69,6 @@ function Navbar() {
               className="block py-3 text-sm text-muted-foreground hover:text-foreground transition-colors"
             >
               Home
-            </Link>
-            <Link
-              href="/pricing"
-              className="block py-3 text-sm text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Pricing
-            </Link>
-            <Link
-              href="/contact"
-              className="block py-3 text-sm text-muted-foreground hover:text-foreground transition-colors"
-            >
-              Contact
             </Link>
             <a
               href="https://github.com/justanuragmaurya/thumbnaily-ai"

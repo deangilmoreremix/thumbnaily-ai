@@ -9,27 +9,12 @@ const nextConfig = {
     remotePatterns: [
       {
         protocol: 'https',
-        hostname: 'thumbnaily-storage.s3.ap-south-1.amazonaws.com',
-        pathname: '**',
-      },
-      {
-        protocol: 'https',
         hostname: 'bzxohkrxcwodllketcpz.supabase.co',
         pathname: '**',
       },
       {
         protocol: 'https',
         hostname: '*.supabase.co',
-        pathname: '**',
-      },
-      {
-        protocol: 'https',
-        hostname: 'openrouter.ai',
-        pathname: '**',
-      },
-      {
-        protocol: 'https',
-        hostname: 'cdn.opengraph.com',
         pathname: '**',
       },
       {
@@ -42,11 +27,6 @@ const nextConfig = {
         hostname: 'cdn.iconscout.com',
         pathname: '**'
       },
-      {
-        protocol: 'https',
-        hostname: 'i.ytimg.com',
-        pathname: '**'
-      }
     ],
   },
 };

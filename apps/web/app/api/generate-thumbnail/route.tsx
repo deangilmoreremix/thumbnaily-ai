@@ -1,7 +1,6 @@
-// API endpoint for thumbnail generation using OpenAI image API via OpenRouter
+// API endpoint for thumbnail generation using OpenAI image API
 import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
-import { enhancePrompt } from "@/lib/enhancePrompt";
 import { supabaseAdmin } from "@/lib/supabase";
 
 interface ProgressData {
@@ -30,46 +29,21 @@ const BUCKET_NAME = 'thumbnails';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
-  baseURL: "https://openrouter.ai/api/v1",
 });
 
-async function generateImage(prompt: string): Promise<Buffer> {
-  const response = await openai.chat.completions.create({
-    model: "openai/gpt-5-image",
-    modalities: ["image", "text"],
-    messages: [
-      {
-        role: "user",
-        content: [
-          {
-            type: "text",
-            text: prompt,
-          },
-        ],
-      },
-    ],
+async function generateImage(prompt: string): Promise<string> {
+  const response = await openai.images.generate({
+    model: "gpt-image",
+    prompt: prompt,
+    n: 1,
+    size: "1024x576",
   });
 
-  // Extract image URL from response (images are returned as base64 data URLs)
-  const imageUrl = response.choices[0]?.message?.images?.[0]?.image_url?.url;
-
-  if (!imageUrl) {
-    throw new Error("Image generation failed - no image returned");
+  if (!response.data?.[0]?.url) {
+    throw new Error("Image generation failed - no URL returned");
   }
 
-  // If it's a base64 data URL, decode it to get the buffer
-  if (imageUrl.startsWith('data:')) {
-    const base64Data = imageUrl.split(',')[1];
-    return Buffer.from(base64Data, 'base64');
-  }
-
-  // Otherwise fetch the image from URL
-  const mediaResponse = await fetch(imageUrl);
-  if (!mediaResponse.ok) {
-    throw new Error(`Failed to download generated image: ${mediaResponse.statusText}`);
-  }
-  
-  return Buffer.from(await mediaResponse.arrayBuffer());
+  return response.data[0].url;
 }
 
 export async function POST(req: NextRequest) {
@@ -109,22 +83,20 @@ export async function POST(req: NextRequest) {
       try {
         updateProgress(progressId, "Enhancing prompt", 25);
 
-        const enhancedPromptResponse = await enhancePrompt(basicPrompt, imageUrls);
-        if (!enhancedPromptResponse) {
-          throw new Error("Failed to enhance prompt: empty response");
-        }
-        const { prompt: enhancedContent, style, mood } = JSON.parse(enhancedPromptResponse);
-        if (!enhancedContent) {
-          throw new Error("Failed to parse enhanced prompt");
-        }
-        
-        // Combine style and mood into the prompt
-        const finalPrompt = `[Style: ${style || 'cinematic'}, Mood: ${mood || 'dramatic'}] ${enhancedContent}`;
+        // Simple prompt enhancement - just use the basic prompt
+        const finalPrompt = basicPrompt;
         updateProgress(progressId, "Prompt enhanced", 35);
 
         updateProgress(progressId, "Generating image", 50);
 
-        const mediaBuffer = await generateImage(finalPrompt);
+        const outputUrl = await generateImage(finalPrompt);
+
+        updateProgress(progressId, "Downloading generated content", 70);
+        const mediaResponse = await fetch(outputUrl);
+        if (!mediaResponse.ok) {
+          throw new Error(`Failed to download generated content: ${mediaResponse.statusText}`);
+        }
+        const mediaBuffer = await mediaResponse.arrayBuffer();
 
         updateProgress(progressId, "Uploading to cloud storage", 80);
         
@@ -132,7 +104,7 @@ export async function POST(req: NextRequest) {
         
         const { error: uploadError } = await supabaseAdmin.storage
           .from(BUCKET_NAME)
-          .upload(key, mediaBuffer, {
+          .upload(key, Buffer.from(mediaBuffer), {
             contentType: 'image/png',
             upsert: false,
           });
