@@ -3,6 +3,9 @@ import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import { supabaseAdmin } from "@/lib/supabase";
 
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 interface ProgressData {
   step: string;
   progress: number;
@@ -22,9 +25,13 @@ const updateProgress = (
   progressStore.set(progressId, { step, progress, imageUrl, error });
 };
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+function getOpenAIClient(): OpenAI {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY environment variable not configured");
+  }
+  return new OpenAI({ apiKey });
+}
 
 type EnhancementType = 'upscale' | 'background_removal' | 'face_enhance' | 'ghibli_style' | 'outpaint';
 
@@ -45,17 +52,20 @@ async function enhanceImage(imageUrl: string, enhancementType: EnhancementType, 
   if (!imageResponse.ok) {
     throw new Error(`Failed to fetch image: ${imageResponse.statusText}`);
   }
-  const imageBuffer = await imageResponse.arrayBuffer();
-  const imageBase64 = Buffer.from(imageBuffer).toString('base64');
+  const imageArrayBuffer = await imageResponse.arrayBuffer();
+  
+  // Convert to Blob for OpenAI SDK
+  const imageBlob = new Blob([imageArrayBuffer], { type: 'image/png' });
 
   const enhancementPrompt = getEnhancementPrompt(enhancementType, prompt);
 
+  const openai = getOpenAIClient();
   const response = await openai.images.edit({
     model: "gpt-image",
-    image: imageBase64,
+    image: imageBlob,
     prompt: enhancementPrompt,
     n: 1,
-    size: "1024x576",
+    size: "1024x1024",
   });
 
   if (!response.data?.[0]?.url) {

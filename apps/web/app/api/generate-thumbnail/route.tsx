@@ -3,6 +3,9 @@ import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import { supabaseAdmin } from "@/lib/supabase";
 
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 interface ProgressData {
   step: string;
   progress: number;
@@ -27,16 +30,21 @@ const updateProgress = (
 
 const BUCKET_NAME = 'thumbnails';
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+function getOpenAIClient(): OpenAI {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
+    throw new Error("OPENAI_API_KEY environment variable not configured");
+  }
+  return new OpenAI({ apiKey });
+}
 
 async function generateImage(prompt: string): Promise<string> {
+  const openai = getOpenAIClient();
   const response = await openai.images.generate({
     model: "gpt-image",
     prompt: prompt,
     n: 1,
-    size: "1024x576",
+    size: "1024x1024",
   });
 
   if (!response.data?.[0]?.url) {
@@ -51,22 +59,7 @@ export async function POST(req: NextRequest) {
   updateProgress(progressId, "Initializing", 0);
 
   try {
-    const { basicPrompt, image_url, image_urls, isPublic } = await req.json();
-
-    // Normalise image URLs: prefer the array, fall back to single, default empty
-    const imageUrls: string[] = Array.isArray(image_urls)
-      ? image_urls.filter((u): u is string => typeof u === "string" && Boolean(u))
-      : image_url
-        ? [image_url]
-        : [];
-
-    if (imageUrls.length > 5) {
-      updateProgress(progressId, "Error", 15, { error: "Max 5 reference images allowed" });
-      return NextResponse.json(
-        { error: true, message: "You can upload up to 5 reference images", progressId },
-        { status: 400 }
-      );
-    }
+    const { basicPrompt, isPublic } = await req.json();
 
     if (!basicPrompt) {
       updateProgress(progressId, "Error", 15, { error: "Prompt is missing" });
@@ -118,6 +111,22 @@ export async function POST(req: NextRequest) {
           .getPublicUrl(key);
 
         const finalUrl = publicUrlData.publicUrl;
+
+        // Save to database for public thumbnails
+        if (isPublic) {
+          const { error: dbError } = await supabaseAdmin
+            .from('thumbnails')
+            .insert({
+              prompt: basicPrompt,
+              image_url: finalUrl,
+              is_public: true,
+            });
+
+          if (dbError) {
+            console.error("Failed to save thumbnail record:", dbError.message);
+          }
+        }
+
         updateProgress(progressId, "Cloud upload complete", 90);
         updateProgress(progressId, "Complete", 100, { imageUrl: finalUrl });
         console.log("Done");

@@ -2,6 +2,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 const BUCKET_NAME = 'thumbnails';
 
 export async function POST(request: NextRequest) {
@@ -36,7 +39,6 @@ export async function POST(request: NextRequest) {
       if (fileType.includes('jpeg') || fileType.includes('jpg')) return 'jpeg';
       if (fileType.includes('png')) return 'png';
       if (fileType.includes('webp')) return 'webp';
-      if (fileType.includes('gif')) return 'gif';
       
       // Fallback to fileName extension
       const ext = fileName.split('.').pop()?.toLowerCase();
@@ -49,9 +51,7 @@ export async function POST(request: NextRequest) {
     // Generate a signed upload URL using Supabase admin
     const { data: signedUrlData, error: signedUrlError } = await supabaseAdmin.storage
       .from(BUCKET_NAME)
-      .createSignedUploadUrl(path, {
-        contentType: fileType,
-      });
+      .createSignedUploadUrl(path);
 
     if (signedUrlError) {
       throw new Error(signedUrlError.message);
