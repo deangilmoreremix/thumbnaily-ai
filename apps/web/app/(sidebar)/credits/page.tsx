@@ -1,7 +1,7 @@
 "use client";
 import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
-import Link from "next/navigation";
+import Link from "next/link";
 import React from "react";
 import { Sora } from "next/font/google";
 
