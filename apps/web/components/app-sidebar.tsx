@@ -1,11 +1,8 @@
 "use client";
 import Link from "next/link";
 import {
-  DollarSign,
   Globe,
-  Image,
   ImagePlus,
-  User2,
   ChevronLeft,
   ChevronRight,
   X,
