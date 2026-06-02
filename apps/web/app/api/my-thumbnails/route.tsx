@@ -1,32 +1,17 @@
 import { NextResponse } from "next/server";
-import db from "@repo/db"
-import { auth } from "@/lib/auth";
+import { supabase } from "@/lib/supabase";
 
-export async function GET(){
-    const session = await auth()
+export async function GET() {
+  // Without auth, just return public thumbnails
+  const { data: thumbnails, error } = await supabase
+    .from("thumbnails")
+    .select("link, createdAt")
+    .eq("isPublic", true)
+    .order("createdAt", { ascending: false });
+  
+  if (error) {
+    return NextResponse.json({ error: "Failed to fetch thumbnails" }, { status: 500 });
+  }
 
-    if(!session){
-        return NextResponse.json({
-            "error":"User not found"
-        })
-    }
-    
-    const user = await db.user.findFirst({
-        where:{
-            email:session?.user?.email as string
-        }
-    })
-
-    const thumbnails = await db.thumbnails.findMany({
-        where:{
-            creatorID:user?.id
-        },
-        include: {
-            referenceImages: true
-        }
-    })
-
-    return NextResponse.json({
-        thumbnails
-    })
+  return NextResponse.json({ thumbnails });
 }

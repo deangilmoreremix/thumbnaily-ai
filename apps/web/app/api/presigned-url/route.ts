@@ -1,38 +1,8 @@
-import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { NextRequest, NextResponse } from "next/server";
-
-const getR2Config = () => {
-  const accountId = process.env.R2_ACCOUNT_ID;
-  const accessKeyId = process.env.R2_ACCESS_KEY_ID;
-  const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
-  const bucketName = process.env.R2_BUCKET_NAME;
-  const publicBaseUrl = process.env.R2_PUBLIC_BASE_URL;
-
-  if (!accountId || !accessKeyId || !secretAccessKey || !bucketName || !publicBaseUrl) {
-    throw new Error(
-      "Missing one or more R2 env vars: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET_NAME, R2_PUBLIC_BASE_URL"
-    );
-  }
-
-  return {
-    bucketName,
-    publicBaseUrl: publicBaseUrl.replace(/\/+$/, ""),
-    client: new S3Client({
-      region: "auto",
-      endpoint: `https://${accountId}.r2.cloudflarestorage.com`,
-      forcePathStyle: true,
-      credentials: {
-        accessKeyId,
-        secretAccessKey,
-      },
-    }),
-  };
-};
+import { supabase } from "@/lib/supabase";
 
 export async function POST(request: NextRequest) {
   try {
-    const { client, bucketName, publicBaseUrl } = getR2Config();
     const { fileName, fileType, fileSize } = await request.json();
 
     if (
@@ -63,30 +33,39 @@ export async function POST(request: NextRequest) {
       if (fileType.includes('jpeg') || fileType.includes('jpg')) return 'jpeg';
       if (fileType.includes('png')) return 'png';
       if (fileType.includes('webp')) return 'webp';
-      if (fileType.includes('gif')) return 'gif';
       
-      // Fallback to fileName extension
       const ext = fileName.split('.').pop()?.toLowerCase();
       return ext || 'jpeg';
     };
 
     const fileExtension = getFileExtension(fileName, fileType);
-    const key = `thumbnails/uploads/${Math.floor(Math.random() * 1000) + Date.now().toString()}.${fileExtension}`;
-    
-    const cmd = new PutObjectCommand({
-      Bucket: bucketName,
-      Key: key, 
-      ContentType: fileType,
-    });
+    const key = `thumbnails/uploads/${Date.now()}-${Math.floor(Math.random() * 1000)}.${fileExtension}`;
 
-    const signedUrl = await getSignedUrl(client, cmd, { expiresIn: 3600 });
-    const fileUrl = `${publicBaseUrl}/${key}`;
+    // For Supabase storage, we return the upload URL and key
+    // The client will use supabase-js to upload directly
+    const { data: signedUrlData, error: signedUrlError } = await supabase.storage
+      .from("thumbnails")
+      .createSignedUploadUrl(key);
 
-    return NextResponse.json({ signedUrl, fileUrl, key });
-  } catch (error) {
-    console.error('Error generating presigned URL:', error);
+    if (signedUrlError) {
+      return NextResponse.json({ 
+        error: 'Failed to generate upload URL', 
+        details: signedUrlError.message 
+      }, { status: 500 });
+    }
+
+    const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/thumbnails/${key}`;
+
     return NextResponse.json({ 
-      error: 'Failed to generate presigned URL', 
+      signedUrl: signedUrlData.signedUrl, 
+      token: signedUrlData.token,
+      fileUrl, 
+      key 
+    });
+  } catch (error) {
+    console.error('Error generating upload URL:', error);
+    return NextResponse.json({ 
+      error: 'Failed to generate upload URL', 
       details: error instanceof Error ? error.message : 'Unknown error' 
     }, { status: 500 });
   }

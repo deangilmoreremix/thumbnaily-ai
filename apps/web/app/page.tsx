@@ -1,17 +1,23 @@
 import Footer from "@/components/Footer";
 import LandingPage from "@/components/LandingPage";
 import Navbar from "@/components/Navbar";
-import db from "@repo/db";
+import { supabase } from "@/lib/supabase";
 
 async function getLatestThumbnails() {
   try {
-    const thumbnails = await db.thumbnails.findMany({
-      where: { isPublic: true },
-      orderBy: { createdAt: "desc" },
-      take: 12,
-      select: { link: true },
-    });
-    return thumbnails.map((t) => t.link);
+    const { data: thumbnails, error } = await supabase
+      .from("thumbnails")
+      .select("link")
+      .eq("isPublic", true)
+      .order("createdAt", { ascending: false })
+      .limit(12);
+    
+    if (error) {
+      console.error("Error fetching thumbnails:", error);
+      return [];
+    }
+    
+    return thumbnails?.map((t) => t.link) ?? [];
   } catch {
     return [];
   }

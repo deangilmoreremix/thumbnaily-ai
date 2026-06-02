@@ -12,7 +12,6 @@ export async function enhancePrompt(
   });
 
   const ai = new OpenAI({
-    baseURL: "https://openrouter.ai/api/v1",
     apiKey: process.env.OPENAI_API_KEY,
   });
 
@@ -26,7 +25,7 @@ export async function enhancePrompt(
   ];
 
   const aiPrompt = await ai.chat.completions.create({
-    model: "openai/gpt-oss-120b:free",
+    model: "gpt-4o-mini",
     messages: [
       {
         role: "system",
