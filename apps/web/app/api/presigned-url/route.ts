@@ -41,27 +41,10 @@ export async function POST(request: NextRequest) {
     const fileExtension = getFileExtension(fileName, fileType);
     const key = `thumbnails/uploads/${Date.now()}-${Math.floor(Math.random() * 1000)}.${fileExtension}`;
 
-    // For Supabase storage, we return the upload URL and key
-    // The client will use supabase-js to upload directly
-    const { data: signedUrlData, error: signedUrlError } = await supabase.storage
-      .from("thumbnails")
-      .createSignedUploadUrl(key);
-
-    if (signedUrlError) {
-      return NextResponse.json({ 
-        error: 'Failed to generate upload URL', 
-        details: signedUrlError.message 
-      }, { status: 500 });
-    }
-
+    // Return the key and bucket info for client-side upload using supabase-js
     const fileUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/thumbnails/${key}`;
 
-    return NextResponse.json({ 
-      signedUrl: signedUrlData.signedUrl, 
-      token: signedUrlData.token,
-      fileUrl, 
-      key 
-    });
+    return NextResponse.json({ fileUrl, key, bucket: "thumbnails" });
   } catch (error) {
     console.error('Error generating upload URL:', error);
     return NextResponse.json({ 

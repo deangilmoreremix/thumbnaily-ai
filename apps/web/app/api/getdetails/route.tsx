@@ -1,29 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
-import db from "@repo/db"
+import { supabase } from "@/lib/supabase";
 
-export async function POST(req:NextRequest){
-    
-    const {thumbnailid} = await req.json();
-    
-    const data = await db.thumbnails.findUnique({
-        where:{
-            id:thumbnailid
-        },
-        include: {
-            referenceImages: true
-        }
-    });
+export async function POST(req: NextRequest) {
+  const { thumbnailid } = await req.json();
 
-    if(!data){
-        return NextResponse.json({
-            error:"Data not found."
-        })
-    }
+  const { data, error } = await supabase
+    .from("thumbnails")
+    .select(`*, referenceImages(*)`)
+    .eq("id", thumbnailid)
+    .single();
 
-    const user = await db.user.findUnique({
-        where:{
-            id:data?.creatorID
-        }
-    })
-    return(NextResponse.json({data,user}))
+  if (error || !data) {
+    return NextResponse.json({ error: "Data not found." }, { status: 404 });
+  }
+
+  // Since there's no user auth now, just return the thumbnail data
+  // The creator info is not available without auth
+  return NextResponse.json({ 
+    data, 
+    user: { name: "Anonymous", avatar: null } 
+  });
 }

@@ -28,10 +28,7 @@ interface AppSidebarProps {
 
 const navItems = [
   { href: "/app", title: "Generate", icon: ImagePlus },
-  { href: "/my-thumbnails", title: "My Thumbnails", icon: Image },
   { href: "/public", title: "Explore", icon: Globe },
-  { href: "/account", title: "Account", icon: User2 },
-  { href: "/credits", title: "Credits", icon: DollarSign },
 ];
 
 const AppSidebar: React.FC<AppSidebarProps> = ({

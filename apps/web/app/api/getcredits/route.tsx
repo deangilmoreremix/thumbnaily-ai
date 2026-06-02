@@ -1,23 +1,6 @@
-import { auth } from "@/lib/auth"
-import db from "@repo/db"
-import { NextResponse } from "next/server"
+import { NextResponse } from "next/server";
 
-export async function GET(){
-    const session = await auth();
-    
-    if(!session || !session.user.email){
-        return NextResponse.json({
-            error:true,
-            message:"Not Authenticated"
-        })
-    }
-    const user = await db.user.findUnique({
-        where:{
-            email:session.user.email
-        }
-    })
-
-    return NextResponse.json({
-        credits:user?.credits
-    })
+export async function GET() {
+  // Without auth, credits are free
+  return NextResponse.json({ credits: "unlimited" });
 }

@@ -1,22 +1,20 @@
-import { NextRequest , NextResponse } from "next/server";
-import db from "@repo/db"
-export async function POST(req:NextRequest){
-    const { email } = await req.json()
+import { NextRequest, NextResponse } from "next/server";
+import { supabase } from "@/lib/supabase";
 
-    if(!email){
-        return NextResponse.json({
-        success:false
-        
-    })
-    }
-    
-    await db.waitlistUsers.create({
-        data:{
-            email:email
-        }
-    })
+export async function POST(req: NextRequest) {
+  const { email } = await req.json();
 
-    return NextResponse.json({
-        success:true
-    })
+  if (!email) {
+    return NextResponse.json({ success: false });
+  }
+
+  const { error } = await supabase
+    .from("waitlist_users")
+    .insert({ email });
+
+  if (error) {
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ success: true });
 }

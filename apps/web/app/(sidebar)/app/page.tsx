@@ -212,25 +212,26 @@ export default function GenerationPage() {
 
     if (!response.ok) {
       const errorData = await response.json();
-
       throw new Error(
-        `Failed to get presigned URL: ${
-          errorData.error || response.statusText
-        }`
+        `Failed to get upload URL: ${errorData.error || response.statusText}`
       );
     }
 
-    const { signedUrl, fileUrl } = await response.json();
+    const { fileUrl, key } = await response.json();
+    
+    // Use supabase-js to upload directly
+    const { createClient } = await import("@supabase/supabase-js");
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
 
-    const uploadResponse = await fetch(signedUrl, {
-      method: "PUT",
-      body: file,
-    });
+    const { error: uploadError } = await supabase.storage
+      .from("thumbnails")
+      .upload(key, file);
 
-    if (!uploadResponse.ok) {
-      throw new Error(
-        `Failed to upload file: ${uploadResponse.status} ${uploadResponse.statusText}`
-      );
+    if (uploadError) {
+      throw new Error(`Failed to upload file: ${uploadError.message}`);
     }
 
     return fileUrl;
