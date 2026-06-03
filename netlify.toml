@@ -6,6 +6,7 @@
 [build.environment]
   NODE_VERSION = "20"
   NEXT_TELEMETRY_DISABLED = "1"
+  NEXT_PUBLIC_SUPABASE_URL = "https://bzxohkrxcwodllketcpz.supabase.co"
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
