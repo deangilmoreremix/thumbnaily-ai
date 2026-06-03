@@ -73,6 +73,18 @@ export async function POST(req: NextRequest) {
       apiKey: process.env.OPENAI_API_KEY,
     });
 
+    // Prepare image content with proper typing for OpenAI Responses API
+    const imageContent = imageUrls.map((url) => {
+      const imageInput: any = {
+        type: "input_image",
+        image_url: {
+          url,
+          detail: "auto"
+        }
+      };
+      return imageInput;
+    });
+
     const response = await openai.responses.create({
       model: "gpt-4.1",
       input: [
@@ -80,13 +92,7 @@ export async function POST(req: NextRequest) {
           role: "user",
           content: [
             { type: "input_text" as const, text: enhancedContent },
-            ...imageUrls.map((url) => ({
-              type: "input_image" as const,
-              image_url: {
-                url,
-                detail: "auto" as const
-              }
-            })),
+            ...imageContent,
           ],
         },
       ],
@@ -129,12 +135,7 @@ export async function POST(req: NextRequest) {
 
     updateProgress(progressId, "AI generation complete", 75);
 
-    const imageUrl = response.output[0].url;
-    if (!imageUrl) {
-      throw new Error("No image URL in response");
-    }
-
-    updateProgress(progressId, "Downloading generated image", 80);
+    // Download the generated image
     const imageResponse = await fetch(imageUrl);
     if (!imageResponse.ok) {
       throw new Error(`Failed to download generated image: ${imageResponse.statusText}`);
