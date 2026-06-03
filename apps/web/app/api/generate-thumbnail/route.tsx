@@ -82,7 +82,8 @@ export async function POST(req: NextRequest) {
             { type: "input_text", text: enhancedContent },
             ...imageUrls.map((url) => ({
               type: "input_image" as const,
-              input_image: { url, detail: "high" as const },
+              detail: "high" as const,
+              image_url: url,
             })),
           ],
         },
@@ -90,13 +91,11 @@ export async function POST(req: NextRequest) {
       tools: [{ type: "image_generation" }],
     });
 
-    if (!response.output || !response.output[0] || response.output[0].type !== "image") {
+if (!response.output || !response.output[0] || response.output[0].type !== "image_generation_call") {
       throw new Error("AI generation failed or returned no output");
     }
 
-    updateProgress(progressId, "AI generation complete", 75);
-
-    const imageUrl = response.output[0].url;
+    const imageUrl = (response.output[0] as { url?: string }).url;
     if (!imageUrl) {
       throw new Error("No image URL in response");
     }
@@ -109,6 +108,10 @@ export async function POST(req: NextRequest) {
     const imageBuffer = await imageResponse.arrayBuffer();
 
     updateProgress(progressId, "Uploading to Supabase storage", 85);
+
+    if (!supabase) {
+      throw new Error("Supabase client not initialized");
+    }
 
     const key = `thumbnails/generations/${Date.now()}-${Math.floor(Math.random() * 1000)}.png`;
     const { error: uploadError } = await supabase.storage
