@@ -1,46 +1,45 @@
 import OpenAI from "openai";
 import { systemPrompt } from "./prompts";
-import { zodResponseFormat } from "openai/helpers/zod";
-import { z } from "zod";
 
 export async function enhancePrompt(
   userPrompt: string,
   image_urls: string[] = []
 ) {
-  const prompt = z.object({
-    prompt: z.string(),
-  });
-
   const ai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
   });
 
   const validImageUrls = image_urls.filter(Boolean);
-  const content: OpenAI.Chat.Completions.ChatCompletionContentPart[] = [
-    { type: "text", text: userPrompt },
+  const content: Array<{ type: "input_text"; text: string } | { type: "input_image"; image_url: string; detail: "high" }> = [
+    { type: "input_text", text: userPrompt },
     ...validImageUrls.map((url) => ({
-      type: "image_url" as const,
-      image_url: { url },
+      type: "input_image" as const,
+      image_url: url,
+      detail: "high" as const,
     })),
   ];
 
-  const aiPrompt = await ai.chat.completions.create({
+  const response = await ai.responses.create({
     model: "gpt-4o-mini",
-    messages: [
+    input: [
       {
         role: "system",
         content: systemPrompt,
       },
       {
         role: "user",
-        content: content,
+        content,
       },
     ],
-    response_format: zodResponseFormat(prompt, "prompt"),
+    text: {
+      format: {
+        type: "json_object",
+      },
+    },
   });
 
-  if (!aiPrompt.choices[0]) {
+  if (!response.output_text) {
     return "";
   }
-  return aiPrompt.choices[0].message.content;
+  return response.output_text;
 }
