@@ -79,10 +79,13 @@ export async function POST(req: NextRequest) {
         {
           role: "user",
           content: [
-            { type: "text", text: enhancedContent },
+            { type: "input_text" as const, text: enhancedContent },
             ...imageUrls.map((url) => ({
-              type: "image_url" as const,
-              image_url: { url },
+              type: "input_image" as const,
+              image_url: {
+                url,
+                detail: "auto" as const
+              }
             })),
           ],
         },
@@ -90,8 +93,38 @@ export async function POST(req: NextRequest) {
       tools: [{ type: "image_generation" }],
     });
 
-    if (!response.output || !response.output[0] || response.output[0].type !== "image") {
+    if (!response.output || !response.output[0] || response.output[0].type !== "image_generation_call") {
       throw new Error("AI generation failed or returned no output");
+    }
+
+    const imageGenerationResult = response.output[0];
+    // Extract image URL from the image generation call result
+    let imageUrl: string | undefined = undefined;
+    if (imageGenerationResult && typeof imageGenerationResult === 'object') {
+      // Try to extract URL from various possible properties
+      imageUrl =
+        // Direct url property
+        'url' in imageGenerationResult && typeof (imageGenerationResult as any).url === 'string'
+          ? (imageGenerationResult as any).url
+          // nested image_url.url property
+          : 'image_url' in imageGenerationResult && 
+            typeof (imageGenerationResult as any).image_url === 'object' &&
+            (imageGenerationResult as any).image_url !== null &&
+            'url' in (imageGenerationResult as any).image_url &&
+            typeof (imageGenerationResult as any).image_url.url === 'string'
+            ? (imageGenerationResult as any).image_url.url
+            // result.url property (sometimes used)
+            : 'result' in imageGenerationResult && 
+              typeof (imageGenerationResult as any).result === 'object' &&
+              (imageGenerationResult as any).result !== null &&
+              'url' in (imageGenerationResult as any).result &&
+              typeof (imageGenerationResult as any).result.url === 'string'
+              ? (imageGenerationResult as any).result.url
+              : undefined;
+    }
+
+    if (!imageUrl) {
+      throw new Error("No image URL in response");
     }
 
     updateProgress(progressId, "AI generation complete", 75);
