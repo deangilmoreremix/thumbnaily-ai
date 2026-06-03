@@ -79,10 +79,10 @@ export async function POST(req: NextRequest) {
         {
           role: "user",
           content: [
-            { type: "text", text: enhancedContent },
+            { type: "input_text", text: enhancedContent },
             ...imageUrls.map((url) => ({
-              type: "image_url" as const,
-              image_url: { url },
+              type: "input_image" as const,
+              image_url: { url, detail: "auto" },
             })),
           ],
         },
