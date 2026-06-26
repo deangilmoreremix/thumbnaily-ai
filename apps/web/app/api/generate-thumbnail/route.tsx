@@ -27,6 +27,13 @@ export async function POST(req: NextRequest) {
   const progressId = Math.random().toString(36).substring(7);
   updateProgress(progressId, "Initializing", 0);
 
+  if (!supabase) {
+    return NextResponse.json(
+      { error: true, message: "Supabase not configured", progressId },
+      { status: 500 }
+    );
+  }
+
   try {
     const { basicPrompt, image_url, image_urls, isPublic } = await req.json();
     const publicFlag = typeof isPublic === "boolean" ? isPublic : true;
@@ -79,24 +86,24 @@ export async function POST(req: NextRequest) {
         {
           role: "user",
           content: [
-            { type: "text", text: enhancedContent },
+            { type: "input_text", text: enhancedContent },
             ...imageUrls.map((url) => ({
-              type: "image_url" as const,
-              image_url: { url },
+              type: "input_image",
+              image_url: { url, detail: "auto" },
             })),
-          ],
+          ] as any,
         },
       ],
       tools: [{ type: "image_generation" }],
     });
 
-    if (!response.output || !response.output[0] || response.output[0].type !== "image") {
+    if (!response.output || !response.output[0] || response.output[0].type !== "image_generation_call") {
       throw new Error("AI generation failed or returned no output");
     }
 
     updateProgress(progressId, "AI generation complete", 75);
 
-    const imageUrl = response.output[0].url;
+    const imageUrl = (response.output[0] as any)?.result?.url;
     if (!imageUrl) {
       throw new Error("No image URL in response");
     }

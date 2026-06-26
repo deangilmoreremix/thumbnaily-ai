@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 
 export async function POST(req: NextRequest) {
+  if (!supabase) {
+    return NextResponse.json({ success: false, error: "Supabase not configured" }, { status: 500 });
+  }
+
   const { email } = await req.json();
 
   if (!email) {

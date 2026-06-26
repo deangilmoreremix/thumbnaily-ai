@@ -5,6 +5,8 @@ import { supabase } from "@/lib/supabase";
 
 async function getLatestThumbnails() {
   try {
+    if (!supabase) return [];
+    
     const { data: thumbnails, error } = await supabase
       .from("thumbnails")
       .select("link")
