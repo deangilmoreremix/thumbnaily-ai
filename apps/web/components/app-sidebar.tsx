@@ -1,8 +1,9 @@
 "use client";
 import Link from "next/link";
 import {
-  Globe,
   ImagePlus,
+  Globe,
+  Images,
   ChevronLeft,
   ChevronRight,
   X,
@@ -25,6 +26,7 @@ interface AppSidebarProps {
 
 const navItems = [
   { href: "/app", title: "Generate", icon: ImagePlus },
+  { href: "/my-thumbnails", title: "My Thumbnails", icon: Images },
   { href: "/public", title: "Explore", icon: Globe },
 ];
 
