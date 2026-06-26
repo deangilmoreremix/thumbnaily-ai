@@ -31,13 +31,27 @@ export default function ThumbnailDetails() {
   useEffect(() => {
     if (cached) return;
     async function getDetails() {
-      setLoading(true);
-      const response = await axios.post("/api/getdetails", {
-        thumbnailid,
-      });
-      setData(response.data);
-      appCache.set(cacheKey, response.data);
-      setLoading(false);
+      try {
+        setLoading(true);
+        const response = await axios.post("/api/getdetails", {
+          thumbnailid,
+        });
+
+        if (response.data?.error) {
+          toast(response.data.error || "Failed to load thumbnail details");
+          setData(null);
+          return;
+        }
+
+        setData(response.data);
+        appCache.set(cacheKey, response.data);
+      } catch (error) {
+        console.error("Failed to load details:", error);
+        toast("Failed to load thumbnail details");
+        setData(null);
+      } finally {
+        setLoading(false);
+      }
     }
     getDetails();
     // eslint-disable-next-line react-hooks/exhaustive-deps

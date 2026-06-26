@@ -47,11 +47,15 @@ function Waitlist() {
                 email: email
             })
 
-            if(response.status === 200){
+            if(response.status === 200 && response.data?.success){
                 toast("Added to waitlist", {
                     description: "Have a check on your mailbox, we'll mail as soon as we launch.",
                 })
                 router.push("/")
+            } else {
+                toast("Error", {
+                    description: response.data?.error || "Something went wrong. Please try again.",
+                })
             }
         } catch (err) {
             toast("Error", {

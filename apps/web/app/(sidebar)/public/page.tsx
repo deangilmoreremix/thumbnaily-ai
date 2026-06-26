@@ -3,6 +3,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useState, useRef, useCallback } from "react";
 import { Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { appCache } from "@/lib/cache";
 
 interface Thumbnail {
@@ -48,6 +49,10 @@ export default function ExplorePage() {
         const res = await fetch(`/api/explore?${params}`);
         const json = await res.json();
 
+        if (!res.ok || json.error) {
+          throw new Error(json.error || "Failed to fetch thumbnails");
+        }
+
         setThumbnails((prev) => {
           const existingIds = new Set(prev.map((t) => t.id));
           const fresh = (json.data as Thumbnail[]).filter(
@@ -63,6 +68,9 @@ export default function ExplorePage() {
         });
         setCursor(json.nextCursor);
         setHasMore(!!json.nextCursor);
+      } catch (error) {
+        console.error("Error fetching explore:", error);
+        toast.error("Failed to load thumbnails");
       } finally {
         loadingRef.current = false;
         setLoading(false);

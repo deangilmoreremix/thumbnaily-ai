@@ -8,8 +8,13 @@ export async function POST(req: NextRequest) {
 
   const { email } = await req.json();
 
-  if (!email) {
-    return NextResponse.json({ success: false });
+  if (!email || typeof email !== "string") {
+    return NextResponse.json({ success: false, error: "Email is required" }, { status: 400 });
+  }
+
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(email)) {
+    return NextResponse.json({ success: false, error: "Invalid email address" }, { status: 400 });
   }
 
   const { error } = await supabase

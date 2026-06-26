@@ -81,7 +81,7 @@ export async function POST(req: NextRequest) {
     });
 
     const response = await openai.responses.create({
-      model: "gpt-4.1",
+      model: "gpt-4o",
       input: [
         {
           role: "user",
@@ -97,23 +97,21 @@ export async function POST(req: NextRequest) {
       tools: [{ type: "image_generation" }],
     });
 
-    if (!response.output || !response.output[0] || response.output[0].type !== "image_generation_call") {
+    const imageGenerationCall = response.output?.find(
+      (item: any) => item.type === "image_generation_call"
+    ) as { status: string; result: string | null } | undefined;
+
+    if (!imageGenerationCall || imageGenerationCall.status !== "completed" || !imageGenerationCall.result) {
       throw new Error("AI generation failed or returned no output");
     }
 
     updateProgress(progressId, "AI generation complete", 75);
 
-    const imageUrl = (response.output[0] as any)?.result?.url;
-    if (!imageUrl) {
-      throw new Error("No image URL in response");
-    }
+    // result is a base64-encoded PNG
+    const base64Image = imageGenerationCall.result;
+    const imageBuffer = Buffer.from(base64Image, "base64");
 
-    updateProgress(progressId, "Downloading generated image", 80);
-    const imageResponse = await fetch(imageUrl);
-    if (!imageResponse.ok) {
-      throw new Error(`Failed to download generated image: ${imageResponse.statusText}`);
-    }
-    const imageBuffer = await imageResponse.arrayBuffer();
+    updateProgress(progressId, "Uploading to Supabase storage", 85);
 
     updateProgress(progressId, "Uploading to Supabase storage", 85);
 
