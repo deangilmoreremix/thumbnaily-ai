@@ -8,7 +8,7 @@ export async function GET(req: NextRequest) {
 
   let query = supabase
     .from("thumbnails")
-    .select("*, referenceImages(*)")
+    .select("id, link, prompt, createdAt, size, quality, format, mode, parent_id")
     .eq("isPublic", true)
     .order("createdAt", { ascending: false })
     .limit(limit + 1);
