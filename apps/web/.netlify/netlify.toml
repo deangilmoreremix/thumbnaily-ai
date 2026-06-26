@@ -2,7 +2,7 @@ headersOrigin = "inline"
 redirectsOrigin = "inline"
 
 [images]
-remote_images = ["^(?:https:\\/\\/lh3\\.googleusercontent\\.com(?:\\/(?!\\.)(?:(?:(?!(?:^|\\/)\\.).)*?)|$))$", "^(?:https:\\/\\/cdn\\.iconscout\\.com(?:\\/(?!\\.)(?:(?:(?!(?:^|\\/)\\.).)*?)|$))$", "^(?:https:\\/\\/i\\.ytimg\\.com(?:\\/(?!\\.)(?:(?:(?!(?:^|\\/)\\.).)*?)|$))$"]
+remote_images = ["^(?:https:\\/\\/lh3\\.googleusercontent\\.com(?:\\/(?!\\.)(?:(?:(?!(?:^|\\/)\\.).)*?)|$))$", "^(?:https:\\/\\/cdn\\.iconscout\\.com(?:\\/(?!\\.)(?:(?:(?!(?:^|\\/)\\.).)*?)|$))$", "^(?:https:\\/\\/i\\.ytimg\\.com(?:\\/(?!\\.)(?:(?:(?!(?:^|\\/)\\.).)*?)|$))$", "^(?:https:\\/\\/bzxohkrxcwodllketcpz\\.supabase\\.co(?:\\/(?!\\.)(?:(?:(?!(?:^|\\/)\\.).)*?)|$))$"]
 
 [functions]
 

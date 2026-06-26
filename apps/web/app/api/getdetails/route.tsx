@@ -10,7 +10,7 @@ export async function POST(req: NextRequest) {
 
   const { data, error } = await supabase
     .from("thumbnails")
-    .select(`*, referenceImages(*)`)
+    .select("*")
     .eq("id", thumbnailid)
     .single();
 
