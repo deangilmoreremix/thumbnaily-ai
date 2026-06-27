@@ -9,7 +9,6 @@ const supabaseHostname = (() => {
 })();
 
 const nextConfig = {
-  output: "standalone",
   images: {
     remotePatterns: [
       {
