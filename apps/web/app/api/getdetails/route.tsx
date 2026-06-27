@@ -24,33 +24,39 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Data not found." }, { status: 404 });
   }
 
-  // Load parent (root) reference if this is a refinement
   let parent: Record<string, unknown> | null = null;
   if (data.parent_id) {
     const { data: parentRow } = await supabase
       .from("thumbnails")
-      .select("id, link, prompt, createdAt")
+      .select("id, link, prompt, createdAt, mode")
       .eq("id", data.parent_id as string)
       .single();
     parent = parentRow;
   }
 
-  // Load variations (siblings + children)
-  const { data: variations } = await supabase
+  // Family tree: load all siblings + children of the root
+  const rootId = (data.parent_id as string | null) ?? (data.id as string);
+  const { data: family } = await supabase
     .from("thumbnails")
-    .select("id, link, prompt, createdAt, mode, parent_id")
-    .or(`parent_id.eq.${thumbnailid},id.eq.${data.parent_id ?? "00000000-0000-0000-0000-000000000000"}`)
-    .neq("id", thumbnailid)
+    .select(
+      "id, link, prompt, createdAt, mode, parent_id, caption, critic_score, mood, palette, tags, style, template"
+    )
+    .or(`parent_id.eq.${rootId},id.eq.${rootId}`)
     .order("createdAt", { ascending: true });
 
-  // Root id for the family
-  const rootId = (data.parent_id as string | null) ?? (data.id as string);
+  // Channel variants for this thumbnail
+  const { data: channels } = await supabase
+    .from("channel_variants")
+    .select("id, platform, size, link")
+    .eq("thumbnail_id", thumbnailid)
+    .order("createdAt", { ascending: true });
 
   return NextResponse.json({
     data,
     parent,
-    variations: variations ?? [],
+    variations: family ?? [],
     rootId,
+    channels: channels ?? [],
     user: { name: "Anonymous", avatar: null },
   });
 }

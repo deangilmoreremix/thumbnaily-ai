@@ -22,6 +22,15 @@ import {
   Wand2,
   Pencil,
   Settings2,
+  LayoutGrid,
+  Lightbulb,
+  Check,
+  ChevronDown,
+  History,
+  Trash2,
+  Library,
+  Palette,
+  Star,
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
@@ -46,13 +55,58 @@ interface ProgressState {
   step: string;
   progress: number;
   partialBase64?: string;
-  partialIndex?: number;
+  partialVariantIndex?: number;
   imageUrl?: string;
   thumbnailId?: string;
   error?: string;
 }
 
-const MAX_SIZE = 20 * 1024 * 1024; // 20MB
+interface VariantResult {
+  thumbnailId: string | null;
+  imageUrl: string;
+  angle: string;
+  revisedPrompt: string | null;
+}
+
+interface CoachState {
+  score: number;
+  issues: string[];
+  suggestions: string[];
+  enhanced: string | null;
+  loading: boolean;
+}
+
+interface Template {
+  id: string;
+  slug: string;
+  name: string;
+  category: string;
+  description: string;
+  prefix: string;
+  suffix: string | null;
+  example_prompt: string | null;
+  recommended_size: string | null;
+  recommended_quality: string | null;
+}
+
+interface StylePreset {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  prompt_fragment: string;
+}
+
+interface HistoryEntry {
+  id: string;
+  videoTitle: string;
+  externalPrompt: string;
+  template: string | null;
+  style: string | null;
+  usedAt: number;
+}
+
+const MAX_SIZE = 20 * 1024 * 1024;
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
 
 const SIZE_OPTIONS: { value: ImageSize; label: string }[] = [
@@ -91,11 +145,17 @@ interface DraftData {
   quality: Quality;
   format: ImgFormat;
   background: Background;
+  templateSlug: string | null;
+  styleSlug: string | null;
 }
+
+const HISTORY_KEY = "thumbnaily.history.v1";
+const HISTORY_MAX = 25;
 
 export default function GenerationPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const coachAbortRef = useRef<AbortController | null>(null);
 
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -108,14 +168,25 @@ export default function GenerationPage() {
   const [isDragging, setIsDragging] = useState(false);
   const [isPublic, setIsPublic] = useState(true);
   const [mode, setMode] = useState<Mode>("generate");
+  const [variantsMode, setVariantsMode] = useState(false);
+  const [variantResults, setVariantResults] = useState<VariantResult[]>([]);
 
   const [videoTitle, setVideoTitle] = useState("");
   const [externalPrompt, setExternalPrompt] = useState("");
 
-  const [size, setSize] = useState<ImageSize>("1024x1024");
+  const [size, setSize] = useState<ImageSize>("1536x1024");
   const [quality, setQuality] = useState<Quality>("medium");
   const [format, setFormat] = useState<ImgFormat>("png");
   const [background, setBackground] = useState<Background>("auto");
+
+  const [templateSlug, setTemplateSlug] = useState<string | null>(null);
+  const [styleSlug, setStyleSlug] = useState<string | null>(null);
+
+  const [templates, setTemplates] = useState<Template[]>([]);
+  const [styles, setStyles] = useState<StylePreset[]>([]);
+  const [showTemplatePicker, setShowTemplatePicker] = useState(false);
+  const [showStylePicker, setShowStylePicker] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
 
   const [uploadError, setUploadError] = useState("");
   const [draftSaved, setDraftSaved] = useState(false);
@@ -125,6 +196,33 @@ export default function GenerationPage() {
     step: "",
     progress: 0,
   });
+
+  const [coach, setCoach] = useState<CoachState>({
+    score: 0,
+    issues: [],
+    suggestions: [],
+    enhanced: null,
+    loading: false,
+  });
+
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
+
+  // Load templates + styles + history on mount
+  useEffect(() => {
+    fetch("/api/templates")
+      .then((r) => r.json())
+      .then((j: { templates?: Template[]; styles?: StylePreset[] }) => {
+        setTemplates(j.templates ?? []);
+        setStyles(j.styles ?? []);
+      })
+      .catch(() => {});
+    try {
+      const raw = localStorage.getItem(HISTORY_KEY);
+      if (raw) setHistory(JSON.parse(raw) as HistoryEntry[]);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const draftData: DraftData = useMemo(
     () => ({
@@ -137,6 +235,8 @@ export default function GenerationPage() {
       quality,
       format,
       background,
+      templateSlug,
+      styleSlug,
     }),
     [
       videoTitle,
@@ -148,6 +248,8 @@ export default function GenerationPage() {
       quality,
       format,
       background,
+      templateSlug,
+      styleSlug,
     ]
   );
 
@@ -164,10 +266,12 @@ export default function GenerationPage() {
       !externalPrompt &&
       imageLinks.length === 0 &&
       mode === "generate" &&
-      size === "1024x1024" &&
+      size === "1536x1024" &&
       quality === "medium" &&
       format === "png" &&
-      background === "auto"
+      background === "auto" &&
+      !templateSlug &&
+      !styleSlug
     ) {
       return;
     }
@@ -178,7 +282,19 @@ export default function GenerationPage() {
       return () => clearTimeout(hide);
     }, 1000);
     return () => clearTimeout(timeout);
-  }, [draftData, videoTitle, externalPrompt, imageLinks, mode, size, quality, format, background]);
+  }, [
+    draftData,
+    videoTitle,
+    externalPrompt,
+    imageLinks,
+    mode,
+    size,
+    quality,
+    format,
+    background,
+    templateSlug,
+    styleSlug,
+  ]);
 
   // Restore draft
   useEffect(() => {
@@ -191,15 +307,71 @@ export default function GenerationPage() {
       setImageLinks(parsed.imageLinks ?? []);
       setIsPublic(parsed.isPublic ?? true);
       setMode(parsed.mode ?? "generate");
-      setSize(parsed.size ?? "1024x1024");
+      setSize(parsed.size ?? "1536x1024");
       setQuality(parsed.quality ?? "medium");
       setFormat(parsed.format ?? "png");
       setBackground(parsed.background ?? "auto");
+      setTemplateSlug(parsed.templateSlug ?? null);
+      setStyleSlug(parsed.styleSlug ?? null);
       toast("Recovered previous draft");
     } catch (err) {
       console.error("Failed to restore draft:", err);
     }
   }, []);
+
+  // Prompt coach: debounced critique as the user types
+  useEffect(() => {
+    if (!externalPrompt.trim() || externalPrompt.trim().length < 8) {
+      setCoach({ score: 0, issues: [], suggestions: [], enhanced: null, loading: false });
+      return;
+    }
+    coachAbortRef.current?.abort();
+    const controller = new AbortController();
+    coachAbortRef.current = controller;
+    setCoach((c) => ({ ...c, loading: true }));
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/prompt-coach", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt: externalPrompt,
+            videoTitle,
+          }),
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error("Coach failed");
+        const j = (await res.json()) as Omit<CoachState, "loading">;
+        setCoach({ ...j, loading: false });
+      } catch (err) {
+        if ((err as { name?: string })?.name === "AbortError") return;
+        setCoach((c) => ({ ...c, loading: false }));
+      }
+    }, 1200);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [externalPrompt, videoTitle]);
+
+  const selectedTemplate = useMemo(
+    () => templates.find((t) => t.slug === templateSlug) ?? null,
+    [templates, templateSlug]
+  );
+  const selectedStyle = useMemo(
+    () => styles.find((s) => s.slug === styleSlug) ?? null,
+    [styles, styleSlug]
+  );
+
+  const composedPrompt = useMemo(() => {
+    const parts: string[] = [];
+    if (selectedTemplate?.prefix) parts.push(selectedTemplate.prefix);
+    if (externalPrompt.trim()) parts.push(externalPrompt.trim());
+    if (selectedStyle?.prompt_fragment)
+      parts.push(`Style: ${selectedStyle.prompt_fragment}.`);
+    if (selectedTemplate?.suffix) parts.push(selectedTemplate.suffix);
+    return parts.join("\n\n");
+  }, [selectedTemplate, selectedStyle, externalPrompt]);
 
   const uploadWithPresignedUrl = async (file: File): Promise<string> => {
     const response = await fetch("/api/presigned-url", {
@@ -319,6 +491,24 @@ export default function GenerationPage() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
+  const recordHistory = (entry: Omit<HistoryEntry, "id" | "usedAt">) => {
+    setHistory((prev) => {
+      const next: HistoryEntry[] = [
+        { id: crypto.randomUUID(), usedAt: Date.now(), ...entry },
+        ...prev.filter(
+          (h) =>
+            !(h.videoTitle === entry.videoTitle && h.externalPrompt === entry.externalPrompt)
+        ),
+      ].slice(0, HISTORY_MAX);
+      try {
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+      } catch {
+        /* quota */
+      }
+      return next;
+    });
+  };
+
   const consumeStream = useCallback(async (response: Response) => {
     await consumeSSE(response, {
       onProgress: (data) =>
@@ -332,17 +522,30 @@ export default function GenerationPage() {
         setProgressState((prev) => ({
           ...prev,
           partialBase64: data.base64 ?? prev.partialBase64,
-          partialIndex: data.index ?? prev.partialIndex,
+          partialVariantIndex:
+            (data as { variantIndex?: number }).variantIndex ?? prev.partialVariantIndex,
         })),
-      onComplete: (data) =>
-        setProgressState((prev) => ({
-          ...prev,
-          step: "Complete",
-          progress: 100,
-          imageUrl: data.imageUrl,
-          thumbnailId: data.thumbnailId ?? undefined,
-          revisedPrompt: data.revisedPrompt ?? undefined,
-        })),
+      onComplete: (data) => {
+        const variants = (data as { variants?: VariantResult[] }).variants;
+        if (variants && variants.length > 0) {
+          setVariantResults(variants);
+          setProgressState({
+            step: "Variants ready",
+            progress: 100,
+            imageUrl: variants[0]?.imageUrl,
+            thumbnailId: variants[0]?.thumbnailId ?? undefined,
+          });
+        } else {
+          setProgressState((prev) => ({
+            ...prev,
+            step: "Complete",
+            progress: 100,
+            imageUrl: data.imageUrl,
+            thumbnailId: data.thumbnailId ?? undefined,
+            revisedPrompt: data.revisedPrompt ?? undefined,
+          }));
+        }
+      },
       onError: (data) =>
         setProgressState((prev) => ({
           ...prev,
@@ -368,11 +571,12 @@ export default function GenerationPage() {
     }
 
     setLoading(true);
+    setVariantResults([]);
     setProgressState({
       step: "Initializing...",
       progress: 0,
       partialBase64: undefined,
-      partialIndex: undefined,
+      partialVariantIndex: undefined,
       imageUrl: undefined,
     });
 
@@ -383,6 +587,8 @@ export default function GenerationPage() {
       .filter(Boolean)
       .join("\n\n");
 
+    const finalPrompt = composedPrompt || basicPrompt;
+
     const controller = new AbortController();
     abortRef.current = controller;
 
@@ -391,11 +597,14 @@ export default function GenerationPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          mode,
-          basicPrompt,
+          mode: variantsMode ? "variants" : mode,
+          basicPrompt: finalPrompt,
           isPublic,
           image_urls: imageLinks.length > 0 ? imageLinks : undefined,
           options: { size, quality, format, background },
+          templateSlug,
+          styleSlug,
+          variantCount: variantsMode ? 4 : undefined,
         }),
         signal: controller.signal,
       });
@@ -407,21 +616,28 @@ export default function GenerationPage() {
           if (j.message) msg = j.message;
           else if (j.error) msg = j.error;
         } catch {
-          // ignore
+          /* ignore */
         }
         throw new Error(msg);
       }
 
       await consumeStream(response);
 
-      // After streaming completes, check the final state
       setProgressState((prev) => {
         if (prev.imageUrl) {
           localStorage.removeItem("thumbnail-draft");
-          setImages((existing) => [...existing, prev.imageUrl as string]);
+          if (!variantsMode) {
+            setImages((existing) => [...existing, prev.imageUrl as string]);
+          }
           appCache.del("my-thumbnails");
           appCache.del("explore");
-          toast("Thumbnail generated!");
+          toast(variantsMode ? "Variants generated!" : "Thumbnail generated!");
+          recordHistory({
+            videoTitle: videoTitle.trim(),
+            externalPrompt: externalPrompt.trim(),
+            template: templateSlug,
+            style: styleSlug,
+          });
         } else if (prev.error) {
           toast(`Error: ${prev.error}`);
         }
@@ -445,10 +661,51 @@ export default function GenerationPage() {
     abortRef.current?.abort();
   };
 
-  const lastImage = images.length > 0 ? images[images.length - 1] : null;
-  const previewBase64 = progressState.partialBase64
-    ? `data:image/png;base64,${progressState.partialBase64}`
-    : null;
+  const applyEnhanced = () => {
+    if (coach.enhanced) {
+      setExternalPrompt(coach.enhanced);
+      toast("Applied coach suggestions");
+    }
+  };
+
+  const applyHistoryEntry = (entry: HistoryEntry) => {
+    setVideoTitle(entry.videoTitle);
+    setExternalPrompt(entry.externalPrompt);
+    setTemplateSlug(entry.template);
+    setStyleSlug(entry.style);
+    setShowHistory(false);
+    toast("Loaded from history");
+  };
+
+  const removeHistoryEntry = (id: string) => {
+    setHistory((prev) => {
+      const next = prev.filter((h) => h.id !== id);
+      try {
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  };
+
+  const clearHistory = () => {
+    setHistory([]);
+    try {
+      localStorage.removeItem(HISTORY_KEY);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const coachColor =
+    coach.score >= 85
+      ? "text-green-500"
+      : coach.score >= 60
+      ? "text-yellow-500"
+      : coach.score > 0
+      ? "text-red-500"
+      : "text-muted-foreground";
 
   return (
     <div className="w-full min-h-full">
@@ -472,20 +729,42 @@ export default function GenerationPage() {
           <div className="inline-flex items-center rounded-lg border border-border/60 bg-card/30 p-1">
             <button
               type="button"
-              onClick={() => setMode("generate")}
+              onClick={() => {
+                setMode("generate");
+                setVariantsMode(false);
+              }}
               className={cn(
                 "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md transition-colors",
-                mode === "generate"
+                mode === "generate" && !variantsMode
                   ? "bg-foreground text-background"
                   : "text-muted-foreground hover:text-foreground"
               )}
             >
               <Sparkles className="h-3.5 w-3.5" />
-              Generate
+              Single
             </button>
             <button
               type="button"
-              onClick={() => setMode("edit")}
+              onClick={() => {
+                setMode("generate");
+                setVariantsMode(true);
+              }}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md transition-colors",
+                variantsMode
+                  ? "bg-foreground text-background"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+              4 Variants
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setMode("edit");
+                setVariantsMode(false);
+              }}
               className={cn(
                 "flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md transition-colors",
                 mode === "edit"
@@ -494,7 +773,7 @@ export default function GenerationPage() {
               )}
             >
               <Pencil className="h-3.5 w-3.5" />
-              Edit uploaded
+              Edit
             </button>
           </div>
         </div>
@@ -584,18 +863,279 @@ export default function GenerationPage() {
             className="h-11 rounded-lg"
           />
 
-          <textarea
-            placeholder={
-              mode === "edit"
-                ? "Describe how to edit the uploaded image(s)…"
-                : "Describe the thumbnail you want (subjects, mood, lighting, text overlay, etc.)…"
-            }
-            value={externalPrompt}
-            onChange={(e) => setExternalPrompt(e.target.value)}
-            disabled={loading}
-            rows={4}
-            className="w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] outline-none resize-none"
-          />
+          {/* Template + Style + History pickers row */}
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setShowTemplatePicker((v) => !v)}
+              disabled={loading}
+              className={cn(
+                "inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border transition-colors",
+                templateSlug
+                  ? "border-foreground/40 bg-foreground/5"
+                  : "border-border/60 bg-card/30 hover:bg-card/50"
+              )}
+            >
+              <Library className="h-3.5 w-3.5" />
+              {selectedTemplate ? selectedTemplate.name : "Template"}
+              <ChevronDown className="h-3 w-3" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowStylePicker((v) => !v)}
+              disabled={loading}
+              className={cn(
+                "inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border transition-colors",
+                styleSlug
+                  ? "border-foreground/40 bg-foreground/5"
+                  : "border-border/60 bg-card/30 hover:bg-card/50"
+              )}
+            >
+              <Palette className="h-3.5 w-3.5" />
+              {selectedStyle ? selectedStyle.name : "Style"}
+              <ChevronDown className="h-3 w-3" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowHistory((v) => !v)}
+              disabled={loading || history.length === 0}
+              className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md border border-border/60 bg-card/30 hover:bg-card/50 disabled:opacity-50"
+            >
+              <History className="h-3.5 w-3.5" />
+              History ({history.length})
+            </button>
+            {(templateSlug || styleSlug) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setTemplateSlug(null);
+                  setStyleSlug(null);
+                }}
+                className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+              >
+                <X className="h-3 w-3" />
+                Clear
+              </button>
+            )}
+          </div>
+
+          {/* Template picker dropdown */}
+          {showTemplatePicker && (
+            <div className="rounded-lg border border-border/60 bg-card/30 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Template
+                </p>
+                <button
+                  onClick={() => setShowTemplatePicker(false)}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {templates.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => {
+                      setTemplateSlug(t.slug === templateSlug ? null : t.slug);
+                      if (t.recommended_size && t.recommended_size !== "auto") {
+                        setSize(t.recommended_size as ImageSize);
+                      }
+                      if (t.recommended_quality && t.recommended_quality !== "auto") {
+                        setQuality(t.recommended_quality as Quality);
+                      }
+                      setShowTemplatePicker(false);
+                    }}
+                    className={cn(
+                      "text-left p-3 rounded-md border transition-colors",
+                      templateSlug === t.slug
+                        ? "border-foreground/60 bg-foreground/5"
+                        : "border-border/40 hover:border-foreground/40"
+                    )}
+                  >
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium">{t.name}</p>
+                      <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                        {t.category}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                      {t.description}
+                    </p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Style picker dropdown */}
+          {showStylePicker && (
+            <div className="rounded-lg border border-border/60 bg-card/30 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Style
+                </p>
+                <button
+                  onClick={() => setShowStylePicker(false)}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {styles.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() => {
+                      setStyleSlug(s.slug === styleSlug ? null : s.slug);
+                      setShowStylePicker(false);
+                    }}
+                    className={cn(
+                      "text-left p-2.5 rounded-md border transition-colors",
+                      styleSlug === s.slug
+                        ? "border-foreground/60 bg-foreground/5"
+                        : "border-border/40 hover:border-foreground/40"
+                    )}
+                  >
+                    <p className="text-sm font-medium">{s.name}</p>
+                    {s.description && (
+                      <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-2">
+                        {s.description}
+                      </p>
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* History dropdown */}
+          {showHistory && history.length > 0 && (
+            <div className="rounded-lg border border-border/60 bg-card/30 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Recent
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={clearHistory}
+                    className="text-[11px] text-muted-foreground hover:text-foreground"
+                  >
+                    Clear all
+                  </button>
+                  <button
+                    onClick={() => setShowHistory(false)}
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+              <div className="space-y-1 max-h-64 overflow-y-auto">
+                {history.map((h) => (
+                  <div
+                    key={h.id}
+                    className="group flex items-start gap-2 p-2 rounded-md border border-border/40 hover:border-foreground/40"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => applyHistoryEntry(h)}
+                      className="flex-1 text-left"
+                    >
+                      <p className="text-sm font-medium line-clamp-1">
+                        {h.videoTitle}
+                      </p>
+                      <p className="text-xs text-muted-foreground line-clamp-2">
+                        {h.externalPrompt}
+                      </p>
+                      <div className="flex items-center gap-1 mt-1">
+                        {h.template && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-foreground/10">
+                            {h.template}
+                          </span>
+                        )}
+                        {h.style && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-foreground/10">
+                            {h.style}
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removeHistoryEntry(h.id)}
+                      className="text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="relative">
+            <textarea
+              placeholder={
+                mode === "edit"
+                  ? "Describe how to edit the uploaded image(s)…"
+                  : "Describe the thumbnail you want (subjects, mood, lighting, text overlay, etc.)…"
+              }
+              value={externalPrompt}
+              onChange={(e) => setExternalPrompt(e.target.value)}
+              disabled={loading}
+              rows={4}
+              className="w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] outline-none resize-none"
+            />
+          </div>
+
+          {/* Prompt Coach */}
+          {(coach.score > 0 || coach.loading) && (
+            <div className="rounded-lg border border-border/60 bg-card/30 p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
+                  <Lightbulb className="h-3.5 w-3.5" />
+                  Prompt Coach
+                </p>
+                {coach.loading ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+                ) : (
+                  <span className={cn("text-sm font-semibold tabular-nums", coachColor)}>
+                    {coach.score}/100
+                  </span>
+                )}
+              </div>
+              {!coach.loading && coach.issues.length > 0 && (
+                <ul className="text-xs text-muted-foreground space-y-1 list-disc pl-4">
+                  {coach.issues.map((issue, i) => (
+                    <li key={i}>{issue}</li>
+                  ))}
+                </ul>
+              )}
+              {!coach.loading && coach.suggestions.length > 0 && (
+                <ul className="text-xs space-y-1 list-disc pl-4">
+                  {coach.suggestions.map((s, i) => (
+                    <li key={i} className="text-foreground/80">
+                      {s}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {!coach.loading && coach.enhanced && coach.enhanced !== externalPrompt && (
+                <button
+                  type="button"
+                  onClick={applyEnhanced}
+                  className="w-full text-left text-xs px-3 py-2 rounded-md border border-border/60 bg-background/40 hover:border-foreground/40 flex items-start gap-2"
+                >
+                  <Check className="h-3.5 w-3.5 mt-0.5 shrink-0 text-green-500" />
+                  <span className="line-clamp-2">{coach.enhanced}</span>
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Options panel */}
           <div className="rounded-lg border border-border/60 bg-card/30">
@@ -729,22 +1269,61 @@ export default function GenerationPage() {
                 className="rounded-full px-5 gap-2"
               >
                 <Wand2 className="h-4 w-4" />
-                Generate
+                {variantsMode ? "Generate 4 Variants" : "Generate"}
                 <ArrowUp className="h-4 w-4 -rotate-45" />
               </Button>
             )}
           </div>
         </div>
 
-        {/* Streaming preview + result */}
-        {(loading || lastImage) && (
+        {/* Variant results */}
+        {variantResults.length > 0 && (
+          <div className="mt-8 space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold">Variants</h3>
+              <button
+                onClick={() => setVariantResults([])}
+                className="text-xs text-muted-foreground hover:text-foreground"
+              >
+                Clear
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              {variantResults.map((v, idx) => (
+                <Link
+                  key={idx}
+                  href={v.thumbnailId ? `/public/${v.thumbnailId}` : "#"}
+                  className="group relative rounded-xl overflow-hidden border border-border/50"
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={v.imageUrl}
+                    alt={`Variant ${idx + 1}`}
+                    className="w-full aspect-video object-cover transition-transform group-hover:scale-[1.02]"
+                  />
+                  <div className="absolute top-2 left-2 inline-flex items-center gap-1 text-[10px] uppercase tracking-wide rounded-full bg-background/85 backdrop-blur px-2 py-0.5 border border-border/40">
+                    {String.fromCharCode(65 + idx)}
+                  </div>
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-2">
+                    <span className="text-[11px] text-white/85 line-clamp-2">
+                      {v.angle.replace(/^Variant [A-D]:\s*/, "")}
+                    </span>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Streaming preview + result (single mode) */}
+        {!variantsMode && (loading || images.length > 0) && (
           <div className="mt-8 rounded-xl border border-border/60 bg-card/30 p-4">
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2 text-sm">
-                {loading && (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                )}
-                <span className="font-medium">{progressState.step || "Ready"}</span>
+                {loading && <Loader2 className="h-4 w-4 animate-spin" />}
+                <span className="font-medium">
+                  {progressState.step || "Ready"}
+                </span>
               </div>
               <span className="text-xs text-muted-foreground tabular-nums">
                 {progressState.progress}%
@@ -759,16 +1338,16 @@ export default function GenerationPage() {
             </div>
 
             <div className="relative aspect-video w-full rounded-lg overflow-hidden bg-muted/30 border border-border/40">
-              {previewBase64 ? (
+              {progressState.partialBase64 ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
-                  src={previewBase64}
+                  src={`data:image/png;base64,${progressState.partialBase64}`}
                   alt="Preview"
                   className="w-full h-full object-cover"
                 />
-              ) : lastImage ? (
+              ) : images.length > 0 ? (
                 <Image
-                  src={lastImage}
+                  src={images[images.length - 1] ?? ""}
                   alt="Generated"
                   fill
                   className="object-cover"
@@ -800,6 +1379,53 @@ export default function GenerationPage() {
                 </a>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Variant-mode streaming preview */}
+        {variantsMode && loading && progressState.partialBase64 && (
+          <div className="mt-8 rounded-xl border border-border/60 bg-card/30 p-4">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2 text-sm">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                <span className="font-medium">{progressState.step}</span>
+              </div>
+              <span className="text-xs text-muted-foreground tabular-nums">
+                {progressState.progress}%
+              </span>
+            </div>
+            <div className="h-1.5 rounded-full bg-muted overflow-hidden mb-4">
+              <div
+                className="h-full bg-foreground transition-all duration-300"
+                style={{ width: `${progressState.progress}%` }}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {[0, 1, 2, 3].map((idx) => {
+                const showHere =
+                  progressState.partialBase64 &&
+                  progressState.partialVariantIndex === idx;
+                return (
+                  <div
+                    key={idx}
+                    className="relative aspect-video rounded-md overflow-hidden bg-muted/30 border border-border/40"
+                  >
+                    {showHere ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={`data:image/png;base64,${progressState.partialBase64}`}
+                        alt={`Variant ${String.fromCharCode(65 + idx)} preview`}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
+                        {String.fromCharCode(65 + idx)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>
