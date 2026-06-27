@@ -24,4 +24,4 @@ export async function GET() {
     const message = e instanceof Error ? e.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 500 });
   }
-}
+}// trigger rebuild
