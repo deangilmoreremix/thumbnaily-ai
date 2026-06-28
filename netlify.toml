@@ -1,6 +1,6 @@
 [build]
   base = "."
-  command = "pnpm install && turbo run build --filter web"
+  command = "cd apps/web && pnpm install && pnpm build"
   publish = "apps/web/.next"
 
 [build.environment]
