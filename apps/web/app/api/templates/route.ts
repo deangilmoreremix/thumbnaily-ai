@@ -26,3 +26,4 @@ export async function GET() {
   }
 }// trigger rebuild
 // deploy trigger
+// force rebuild after seed
