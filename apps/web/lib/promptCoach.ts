@@ -37,11 +37,12 @@ const COACH_SCHEMA = {
 
 export async function coachPrompt(
   userPrompt: string,
-  videoTitle?: string
+  videoTitle?: string,
+  apiKey?: string
 ): Promise<PromptCoachResult | null> {
   if (!userPrompt || userPrompt.trim().length < 3) return null;
   let result: PromptCoachResult | null = null;
-  for await (const event of streamCoachPrompt(userPrompt, videoTitle)) {
+  for await (const event of streamCoachPrompt(userPrompt, videoTitle, apiKey)) {
     if (event.type === "complete") result = event.result;
     else if (event.type === "error") return null;
   }
@@ -145,14 +146,20 @@ function tryExtractField(
 
 export async function* streamCoachPrompt(
   userPrompt: string,
-  videoTitle?: string
+  videoTitle?: string,
+  apiKey?: string
 ): AsyncGenerator<PromptCoachEvent> {
   if (!userPrompt || userPrompt.trim().length < 3) {
     yield { type: "error", message: "Prompt too short" };
     return;
   }
+  const key = apiKey ?? process.env.OPENAI_API_KEY;
+  if (!key) {
+    yield { type: "error", message: "OpenAI API key missing" };
+    return;
+  }
   try {
-    const ai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const ai = new OpenAI({ apiKey: key });
 
     const inputParts: Array<
       | { type: "input_text"; text: string }

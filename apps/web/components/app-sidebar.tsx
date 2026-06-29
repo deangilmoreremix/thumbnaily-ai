@@ -7,12 +7,14 @@ import {
   ChevronLeft,
   ChevronRight,
   X,
+  Settings2,
 } from "lucide-react";
 import { ModeToggle } from "./ModeToggle";
 import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { AnimatePresence, motion } from "motion/react";
 import { Sora } from "next/font/google";
+import ApiKeySettings from "./api-key-settings";
 
 const sora = Sora({
   subsets: ["latin"],
@@ -35,6 +37,7 @@ const AppSidebar: React.FC<AppSidebarProps> = ({
   setIsMobileMenuOpen,
 }) => {
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [showApiKeySettings, setShowApiKeySettings] = useState(false);
   const pathname = usePathname();
 
   useEffect(() => {
@@ -147,9 +150,31 @@ const AppSidebar: React.FC<AppSidebarProps> = ({
         <div
           className={`px-3 py-3 border-t border-border/50 ${isCollapsed ? "flex justify-center" : ""}`}
         >
-          <ModeToggle />
+          <div className="space-y-2">
+            {!isCollapsed && (
+              <button
+                onClick={() => setShowApiKeySettings(true)}
+                className="flex items-center gap-2 w-full px-3 py-2 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                <Settings2 className="h-3.5 w-3.5" />
+                API Keys
+              </button>
+            )}
+            {isCollapsed && (
+              <button
+                onClick={() => setShowApiKeySettings(true)}
+                className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors mx-auto block"
+                aria-label="API Keys"
+              >
+                <Settings2 className="h-4 w-4" />
+              </button>
+            )}
+            <ModeToggle />
+          </div>
         </div>
       </motion.aside>
+
+      <ApiKeySettings open={showApiKeySettings} onOpenChange={setShowApiKeySettings} />
     </>
   );
 };

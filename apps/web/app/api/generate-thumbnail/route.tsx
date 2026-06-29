@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import OpenAI from "openai";
+import { getOpenAIKey } from "@/lib/getOpenAIKey";
 import { supabase } from "@/lib/supabase";
 import { systemPrompt } from "@/lib/prompts";
 import { criticThumbnail } from "@/lib/thumbnailCritic";
@@ -474,7 +475,13 @@ export async function POST(req: NextRequest) {
         }
       };
 
-      const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+      const apiKey = getOpenAIKey(req);
+      if (!apiKey) {
+        send("error", { step: "Error", progress: 0, message: "OpenAI API key missing. Add your key in Settings → API Keys." });
+        controller.close();
+        return;
+      }
+      const openai = new OpenAI({ apiKey });
 
       try {
         // =========================================================
