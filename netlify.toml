@@ -1,5 +1,4 @@
 [build]
-  base = "."
   command = "cd apps/web && pnpm install && pnpm build"
   publish = "apps/web/.next"
 
