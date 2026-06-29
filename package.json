@@ -19,6 +19,7 @@
     "db:types": "supabase gen types typescript --linked > apps/web/types/supabase.ts"
   },
   "devDependencies": {
+    "@netlify/plugin-nextjs": "5.15.12",
     "prettier": "^3.5.3",
     "supabase": "^2.108.0",
     "turbo": "^2.5.3",
