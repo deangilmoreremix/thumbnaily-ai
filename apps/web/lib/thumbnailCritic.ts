@@ -54,6 +54,7 @@ export async function criticThumbnail(params: {
   imageUrl: string;
   prompt?: string | null;
   revisedPrompt?: string | null;
+  apiKey?: string;
 }): Promise<CriticResult | null> {
   let result: CriticResult | null = null;
   for await (const event of streamCriticThumbnail(params)) {
@@ -178,9 +179,15 @@ export async function* streamCriticThumbnail(params: {
   imageUrl: string;
   prompt?: string | null;
   revisedPrompt?: string | null;
+  apiKey?: string;
 }): AsyncGenerator<CriticEvent> {
   try {
-    const ai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    const key = params.apiKey ?? process.env.OPENAI_API_KEY;
+    if (!key) {
+      yield { type: "error", message: "OpenAI API key missing" };
+      return;
+    }
+    const ai = new OpenAI({ apiKey: key });
 
     yield { type: "start" };
     yield { type: "analyzing" };

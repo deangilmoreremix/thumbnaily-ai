@@ -34,6 +34,7 @@ import { toast } from "sonner";
 import { Sora } from "next/font/google";
 import { appCache } from "@/lib/cache";
 import { consumeSSE } from "@/lib/sse";
+import { apiFetch } from "@/lib/apiFetch";
 import { cn } from "@/lib/utils";
 
 const sora = Sora({
@@ -353,7 +354,7 @@ export default function ThumbnailDetails() {
     if (!data) return;
     setCriticLoading(true);
     try {
-      const res = await fetch("/api/thumbnail-critic", {
+      const res = await apiFetch("/api/thumbnail-critic", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

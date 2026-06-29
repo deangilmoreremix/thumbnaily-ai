@@ -38,6 +38,7 @@ import { toast } from "sonner";
 import { Sora } from "next/font/google";
 import { appCache } from "@/lib/cache";
 import { consumeSSE } from "@/lib/sse";
+import { apiFetch } from "@/lib/apiFetch";
 import { cn } from "@/lib/utils";
 
 const sora = Sora({
@@ -209,7 +210,7 @@ export default function GenerationPage() {
 
   // Load templates + styles + history on mount
   useEffect(() => {
-    fetch("/api/templates")
+    apiFetch("/api/templates")
       .then((r) => r.json())
       .then((j: { templates?: Template[]; styles?: StylePreset[] }) => {
         setTemplates(j.templates ?? []);
@@ -331,7 +332,7 @@ export default function GenerationPage() {
     setCoach((c) => ({ ...c, loading: true }));
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch("/api/prompt-coach", {
+        const res = await apiFetch("/api/prompt-coach", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -593,7 +594,7 @@ export default function GenerationPage() {
     abortRef.current = controller;
 
     try {
-      const response = await fetch("/api/generate-thumbnail", {
+      const response = await apiFetch("/api/generate-thumbnail", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
