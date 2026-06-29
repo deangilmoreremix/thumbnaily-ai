@@ -42,7 +42,6 @@
     "zod": "^3.25.28"
   },
   "devDependencies": {
-    "@netlify/plugin-nextjs": "^5.15.12",
     "@repo/eslint-config": "workspace:*",
     "@repo/typescript-config": "workspace:*",
     "@types/node": "^22.15.3",
