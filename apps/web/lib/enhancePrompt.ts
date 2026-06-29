@@ -3,10 +3,11 @@ import { systemPrompt } from "./prompts";
 
 export async function enhancePrompt(
   userPrompt: string,
-  image_urls: string[] = []
+  image_urls: string[] = [],
+  apiKey?: string
 ) {
   let result = "";
-  for await (const event of streamEnhancePrompt(userPrompt, image_urls)) {
+  for await (const event of streamEnhancePrompt(userPrompt, image_urls, apiKey)) {
     if (event.type === "complete") result = event.prompt;
   }
   return result;
@@ -20,11 +21,17 @@ export type EnhancePromptEvent =
 
 export async function* streamEnhancePrompt(
   userPrompt: string,
-  image_urls: string[] = []
+  image_urls: string[] = [],
+  apiKey?: string
 ): AsyncGenerator<EnhancePromptEvent> {
   try {
+    const key = apiKey ?? process.env.OPENAI_API_KEY;
+    if (!key) {
+      yield { type: "error", message: "OpenAI API key missing" };
+      return;
+    }
     const ai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY,
+      apiKey: key,
     });
 
     const validImageUrls = image_urls.filter(Boolean);

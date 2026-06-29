@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { streamCoachPrompt } from "@/lib/promptCoach";
+import { getOpenAIKey } from "@/lib/getOpenAIKey";
 
 export const runtime = "nodejs";
 
@@ -23,6 +24,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const apiKey = getOpenAIKey(req);
+    if (!apiKey) {
+      return new Response(
+        sseEvent("error", { message: "OpenAI API key missing. Add your key in Settings → API Keys." }),
+        { status: 400, headers: { "Content-Type": "text/event-stream" } }
+      );
+    }
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
         const send = (event: string, data: unknown) => {
@@ -33,7 +41,7 @@ export async function POST(req: NextRequest) {
           }
         };
         try {
-          for await (const ev of streamCoachPrompt(prompt, body.videoTitle)) {
+          for await (const ev of streamCoachPrompt(prompt, body.videoTitle, apiKey)) {
             send(ev.type, ev);
           }
         } catch (e: unknown) {

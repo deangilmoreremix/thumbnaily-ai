@@ -15,6 +15,7 @@ type GenerationOptions = {
   format?: "png" | "jpeg" | "webp";
   background?: "auto" | "transparent" | "opaque";
   compression?: number;
+  moderation?: "auto" | "low" | "medium" | "high";
 };
 
 type RefinePayload = {
@@ -131,10 +132,11 @@ function isStringArray(v: unknown): v is string[] {
 async function streamEnhanceIntoSSE(
   send: (event: string, data: unknown) => void,
   userPrompt: string,
-  image_urls: string[] = []
+  image_urls: string[] = [],
+  apiKey?: string
 ): Promise<string> {
   let result = "";
-  for await (const ev of streamEnhancePrompt(userPrompt, image_urls)) {
+  for await (const ev of streamEnhancePrompt(userPrompt, image_urls, apiKey)) {
     send(ev.type, ev);
     if (ev.type === "complete") result = ev.prompt;
   }
@@ -520,6 +522,7 @@ export async function POST(req: NextRequest) {
           if (optsForAnalyze.size && optsForAnalyze.size !== "auto") imageGenTool.size = optsForAnalyze.size;
           if (optsForAnalyze.quality && optsForAnalyze.quality !== "auto") imageGenTool.quality = optsForAnalyze.quality;
           if (optsForAnalyze.format) imageGenTool.format = optsForAnalyze.format;
+          if (optsForAnalyze.moderation && optsForAnalyze.moderation !== "auto") imageGenTool.moderation = optsForAnalyze.moderation;
 
           const analyzeTools: Array<Record<string, unknown>> = [imageGenTool];
 
@@ -627,6 +630,8 @@ export async function POST(req: NextRequest) {
           if (optsForResearch.format) imageGenTool.format = optsForResearch.format;
           if (optsForResearch.background && optsForResearch.background !== "auto")
             imageGenTool.background = optsForResearch.background;
+          if (optsForResearch.moderation && optsForResearch.moderation !== "auto")
+            imageGenTool.moderation = optsForResearch.moderation;
 
           const researchTools: Array<Record<string, unknown>> = [
             { type: "web_search" },
@@ -1000,6 +1005,7 @@ export async function POST(req: NextRequest) {
         // =========================================================
         const options: Required<Pick<GenerationOptions, "size" | "quality" | "format" | "background">> & {
           compression?: number;
+          moderation?: GenerationOptions["moderation"];
         } = {
           size: (payload as GeneratePayload | VariantsPayload).options?.size ?? "1024x1024",
           quality: (payload as GeneratePayload | VariantsPayload).options?.quality ?? "medium",
@@ -1008,6 +1014,9 @@ export async function POST(req: NextRequest) {
         };
         if (typeof (payload as GeneratePayload | VariantsPayload).options?.compression === "number") {
           options.compression = Math.max(0, Math.min(100, (payload as GeneratePayload | VariantsPayload).options!.compression!));
+        }
+        if ((payload as GeneratePayload | VariantsPayload).options?.moderation) {
+          options.moderation = (payload as GeneratePayload | VariantsPayload).options!.moderation!;
         }
 
         const isPublic =
@@ -1087,6 +1096,7 @@ export async function POST(req: NextRequest) {
                 quality: options.quality !== "auto" ? options.quality : "medium",
                 format: options.format,
                 background: options.background !== "auto" ? options.background : undefined,
+                moderation: options.moderation && options.moderation !== "auto" ? options.moderation : undefined,
               } as Record<string, unknown>,
               toolChoice: { type: "image_generation" } as unknown as OpenAI.Responses.ResponseCreateParams["tool_choice"],
               sendPartial: (i, b64) =>
@@ -1167,6 +1177,7 @@ export async function POST(req: NextRequest) {
                 imageUrl: first.publicUrl,
                 prompt: basicPrompt,
                 revisedPrompt: first.revisedPrompt ?? null,
+                apiKey,
               });
               critic = c;
               if (firstRootId && c) {
@@ -1244,6 +1255,9 @@ export async function POST(req: NextRequest) {
         if (options.background !== "auto") imageGenTool.background = options.background;
         if (typeof options.compression === "number") {
           imageGenTool.compression = options.compression;
+        }
+        if (options.moderation && options.moderation !== "auto") {
+          imageGenTool.moderation = options.moderation;
         }
 
         const toolChoice: OpenAI.Responses.ResponseCreateParams["tool_choice"] =
@@ -1323,6 +1337,7 @@ export async function POST(req: NextRequest) {
             imageUrl: finalImageUrl,
             prompt: basicPrompt,
             revisedPrompt: r.revisedPrompt ?? null,
+            apiKey,
           });
           critic = c;
           if (inserted?.id && c) {
