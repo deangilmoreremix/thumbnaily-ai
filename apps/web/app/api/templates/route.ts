@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const [tRes, sRes] = await Promise.all([
+    const [{ data: templates }, { data: styles }] = await Promise.all([
       supabase
         .from("prompt_templates")
         .select("id, slug, name, category, description, prefix, suffix, example_prompt, recommended_size, recommended_quality")
@@ -18,9 +18,8 @@ export async function GET() {
     ]);
 
     return NextResponse.json({
-      templates: tRes.data ?? [],
-      styles: sRes.data ?? [],
-      _debug: { tErr: tRes.error?.message, sErr: sRes.error?.message, tCount: tRes.data?.length, sCount: sRes.data?.length },
+      templates: templates ?? [],
+      styles: styles ?? [],
     });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Unknown error";
