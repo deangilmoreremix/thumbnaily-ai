@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { streamCriticThumbnail } from "@/lib/thumbnailCritic";
 import { supabase } from "@/lib/supabase";
+import { getOpenAIKey } from "@/lib/getOpenAIKey";
 
 export const runtime = "nodejs";
 
@@ -48,6 +49,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const apiKey = getOpenAIKey(req);
+    if (!apiKey) {
+      return new Response(
+        sseEvent("error", { message: "OpenAI API key missing. Add your key in Settings → API Keys." }),
+        { status: 400, headers: { "Content-Type": "text/event-stream" } }
+      );
+    }
+
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
         const send = (event: string, data: unknown) => {
@@ -65,6 +74,7 @@ export async function POST(req: NextRequest) {
             imageUrl: imageUrl!,
             prompt,
             revisedPrompt,
+            apiKey,
           })) {
             send(ev.type, ev);
             if (ev.type === "complete") finalResult = ev.result;
