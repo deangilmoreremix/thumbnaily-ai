@@ -1,7 +1,13 @@
-import { NextRequest, NextResponse } from "next/server";
-import { coachPrompt } from "@/lib/promptCoach";
+import { NextRequest } from "next/server";
+import { streamCoachPrompt } from "@/lib/promptCoach";
 
 export const runtime = "nodejs";
+
+function sseEvent(event: string, data: unknown): string {
+  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+}
+
+const encoder = new TextEncoder();
 
 export async function POST(req: NextRequest) {
   try {
@@ -11,18 +17,50 @@ export async function POST(req: NextRequest) {
     };
     const prompt = body.prompt?.trim();
     if (!prompt) {
-      return NextResponse.json({ error: "Prompt is required" }, { status: 400 });
-    }
-    const result = await coachPrompt(prompt, body.videoTitle);
-    if (!result) {
-      return NextResponse.json(
-        { error: "Failed to evaluate prompt" },
-        { status: 500 }
+      return new Response(
+        sseEvent("error", { message: "Prompt is required" }),
+        { status: 400, headers: { "Content-Type": "text/event-stream" } }
       );
     }
-    return NextResponse.json(result);
+
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const send = (event: string, data: unknown) => {
+          try {
+            controller.enqueue(encoder.encode(sseEvent(event, data)));
+          } catch {
+            /* controller closed */
+          }
+        };
+        try {
+          for await (const ev of streamCoachPrompt(prompt, body.videoTitle)) {
+            send(ev.type, ev);
+          }
+        } catch (e: unknown) {
+          const message = e instanceof Error ? e.message : "Unknown error";
+          send("error", { type: "error", message });
+        } finally {
+          try {
+            controller.close();
+          } catch {
+            /* already closed */
+          }
+        }
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+      },
+    });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return new Response(sseEvent("error", { message }), {
+      status: 500,
+      headers: { "Content-Type": "text/event-stream" } },
+    );
   }
 }
