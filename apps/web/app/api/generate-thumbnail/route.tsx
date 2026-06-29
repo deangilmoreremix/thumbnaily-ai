@@ -3,6 +3,7 @@ import OpenAI from "openai";
 import { supabase } from "@/lib/supabase";
 import { systemPrompt } from "@/lib/prompts";
 import { criticThumbnail } from "@/lib/thumbnailCritic";
+import { streamEnhancePrompt } from "@/lib/enhancePrompt";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -65,13 +66,34 @@ type ResizeChannelPayload = {
   channels: { platform: string; size: "1024x1024" | "1024x1536" | "1536x1024" }[];
 };
 
+type ResearchPayload = {
+  mode: "research";
+  basicPrompt: string;
+  searchContext?: string;
+  isPublic?: boolean;
+  options?: GenerationOptions;
+  templateSlug?: string | null;
+  styleSlug?: string | null;
+};
+
+type AnalyzeImprovePayload = {
+  mode: "analyze-and-improve";
+  thumbnailId?: string;
+  imageUrl?: string;
+  instruction?: string;
+  isPublic?: boolean;
+  options?: GenerationOptions;
+};
+
 type RequestPayload =
   | GeneratePayload
   | RefinePayload
   | VariantsPayload
   | CaptionPayload
   | BackgroundPayload
-  | ResizeChannelPayload;
+  | ResizeChannelPayload
+  | ResearchPayload
+  | AnalyzeImprovePayload;
 
 function isRefine(p: RequestPayload): p is RefinePayload {
   return (p as RefinePayload).mode === "refine";
@@ -88,6 +110,12 @@ function isBackground(p: RequestPayload): p is BackgroundPayload {
 function isChannel(p: RequestPayload): p is ResizeChannelPayload {
   return (p as ResizeChannelPayload).mode === "channel";
 }
+function isResearch(p: RequestPayload): p is ResearchPayload {
+  return (p as ResearchPayload).mode === "research";
+}
+function isAnalyzeImprove(p: RequestPayload): p is AnalyzeImprovePayload {
+  return (p as AnalyzeImprovePayload).mode === "analyze-and-improve";
+}
 
 function sseEvent(event: string, data: unknown): string {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -97,6 +125,19 @@ const encoder = new TextEncoder();
 
 function isStringArray(v: unknown): v is string[] {
   return Array.isArray(v) && v.every((x) => typeof x === "string");
+}
+
+async function streamEnhanceIntoSSE(
+  send: (event: string, data: unknown) => void,
+  userPrompt: string,
+  image_urls: string[] = []
+): Promise<string> {
+  let result = "";
+  for await (const ev of streamEnhancePrompt(userPrompt, image_urls)) {
+    send(ev.type, ev);
+    if (ev.type === "complete") result = ev.prompt;
+  }
+  return result;
 }
 
 async function streamOneVariant(
@@ -115,7 +156,7 @@ async function streamOneVariant(
   imageCallId?: string;
 }> {
   const params: OpenAI.Responses.ResponseCreateParams = {
-    model: "gpt-4.1",
+    model: "gpt-5.5",
     instructions: systemPrompt,
     input: args.input,
     tools: [args.imageGenTool as unknown as OpenAI.Responses.Tool],
@@ -181,6 +222,237 @@ async function streamOneVariant(
   };
 }
 
+type MultiToolEvent =
+  | { type: "tool-start"; tool: string }
+  | { type: "searching" }
+  | { type: "search-complete" }
+  | { type: "search-result"; url?: string; title?: string; snippet?: string }
+  | { type: "partial"; index: number; base64: string }
+  | { type: "image-complete"; result?: string; revisedPrompt?: string; responseId?: string; imageCallId?: string }
+  | { type: "complete"; images: Array<{ base64: string; revisedPrompt?: string; index: number }>; searchResults: Array<{ url?: string; title?: string; snippet?: string }>; responseId?: string; revisedPrompt?: string; imageCallId?: string }
+  | { type: "error"; message: string };
+
+async function* streamMultiTool(
+  openai: OpenAI,
+  opts: {
+    prompt: string;
+    imageInputs?: string[];
+    tools: Array<Record<string, unknown>>;
+    model?: string;
+    options?: GenerationOptions;
+    toolChoice?: OpenAI.Responses.ResponseCreateParams["tool_choice"];
+    instructions?: string;
+  }
+): AsyncGenerator<MultiToolEvent> {
+  const model = opts.model ?? "gpt-5.5";
+  const imageInputs = (opts.imageInputs ?? []).filter(Boolean).slice(0, 5);
+
+  const content: Array<Record<string, unknown>> = [
+    { type: "input_text", text: opts.prompt },
+    ...imageInputs.map((url) => ({
+      type: "input_image",
+      image_url: url,
+      detail: "high",
+    })),
+  ];
+
+  const params: OpenAI.Responses.ResponseCreateParams = {
+    model,
+    instructions: opts.instructions ?? systemPrompt,
+    input: [{ role: "user", content: content as unknown as OpenAI.Responses.ResponseInputMessageContentList }],
+    tools: opts.tools as unknown as OpenAI.Responses.Tool[],
+    stream: true,
+  };
+  if (opts.toolChoice) params.tool_choice = opts.toolChoice;
+
+  const stream = await openai.responses.create(params);
+
+  const searchResults: Array<{ url?: string; title?: string; snippet?: string }> = [];
+  const images: Array<{ base64: string; revisedPrompt?: string; index: number }> = [];
+  let responseId: string | undefined;
+  let imageCallId: string | undefined;
+  let lastRevisedPrompt: string | undefined;
+  let webSearchStarted = false;
+  let imageGenStarted = false;
+
+  try {
+    for await (const event of stream) {
+      const evtType = (event as { type: string }).type;
+
+      if (evtType === "response.web_search_call.searching") {
+        if (!webSearchStarted) {
+          webSearchStarted = true;
+          yield { type: "tool-start", tool: "web_search" };
+        }
+        yield { type: "searching" };
+      } else if (evtType === "response.web_search_call.completed") {
+        yield { type: "search-complete" };
+      } else if (evtType === "response.image_generation_call.partial_image") {
+        const e = event as unknown as {
+          partial_image_index: number;
+          partial_image_b64: string;
+        };
+        if (!imageGenStarted) {
+          imageGenStarted = true;
+          yield { type: "tool-start", tool: "image_generation" };
+        }
+        yield {
+          type: "partial",
+          index: e.partial_image_index,
+          base64: e.partial_image_b64,
+        };
+      } else if (evtType === "response.image_generation_call.completed") {
+        const e = event as unknown as { result?: string };
+        yield {
+          type: "image-complete",
+          result: typeof e.result === "string" ? e.result : undefined,
+        };
+      } else if (evtType === "response.output_item.done") {
+        const item = (event as { item: unknown }).item as {
+          id?: string;
+          type?: string;
+          result?: string;
+          revised_prompt?: string;
+          action?: string;
+          query?: string;
+          sources?: Array<{
+            url?: string;
+            title?: string;
+            snippet?: string;
+          }>;
+        };
+        const t = item?.type;
+        if (t === "web_search_call") {
+          if (!webSearchStarted) {
+            webSearchStarted = true;
+            yield { type: "tool-start", tool: "web_search" };
+          }
+          const sources = Array.isArray(item.sources) ? item.sources : [];
+          for (const s of sources) {
+            const rec = {
+              url: typeof s?.url === "string" ? s.url : undefined,
+              title: typeof s?.title === "string" ? s.title : undefined,
+              snippet: typeof s?.snippet === "string" ? s.snippet : undefined,
+            };
+            searchResults.push(rec);
+            yield { type: "search-result", ...rec };
+          }
+          if (sources.length === 0) {
+            const placeholder = {
+              url: undefined,
+              title: undefined,
+              snippet: typeof item.query === "string" ? item.query : undefined,
+            };
+            searchResults.push(placeholder);
+            yield { type: "search-result", ...placeholder };
+          }
+        } else if (t === "image_generation_call") {
+          if (!imageGenStarted) {
+            imageGenStarted = true;
+            yield { type: "tool-start", tool: "image_generation" };
+          }
+          if (typeof item.id === "string") imageCallId = item.id;
+          if (typeof item.result === "string" && item.result.length > 0) {
+            const rec = {
+              base64: item.result,
+              revisedPrompt: typeof item.revised_prompt === "string" ? item.revised_prompt : undefined,
+              index: images.length,
+            };
+            images.push(rec);
+            lastRevisedPrompt = rec.revisedPrompt ?? lastRevisedPrompt;
+            yield {
+              type: "image-complete",
+              result: rec.base64,
+              revisedPrompt: rec.revisedPrompt,
+              imageCallId,
+            };
+          }
+          if (typeof item.revised_prompt === "string") {
+            lastRevisedPrompt = item.revised_prompt;
+          }
+        }
+      } else if (evtType === "response.completed") {
+        const resp = (event as { response: unknown }).response as {
+          id?: string;
+          output?: Array<{
+            id?: string;
+            type?: string;
+            result?: string;
+            revised_prompt?: string;
+            sources?: Array<{
+              url?: string;
+              title?: string;
+              snippet?: string;
+            }>;
+          }>;
+        };
+        if (typeof resp.id === "string") responseId = resp.id;
+        const outs = Array.isArray(resp.output) ? resp.output : [];
+        for (const out of outs) {
+          if (out.type === "web_search_call") {
+            const sources = Array.isArray(out.sources) ? out.sources : [];
+            for (const s of sources) {
+              const rec = {
+                url: typeof s?.url === "string" ? s.url : undefined,
+                title: typeof s?.title === "string" ? s.title : undefined,
+                snippet: typeof s?.snippet === "string" ? s.snippet : undefined,
+              };
+              if (!searchResults.some((x) => x.url === rec.url && x.title === rec.title)) {
+                searchResults.push(rec);
+                yield { type: "search-result", ...rec };
+              }
+            }
+          } else if (out.type === "image_generation_call") {
+            if (typeof out.id === "string") imageCallId = out.id;
+            if (typeof out.result === "string" && out.result.length > 0) {
+              const idx = images.findIndex((i) => i.base64 === out.result);
+              if (idx === -1) {
+                const rec = {
+                  base64: out.result,
+                  revisedPrompt: typeof out.revised_prompt === "string" ? out.revised_prompt : undefined,
+                  index: images.length,
+                };
+                images.push(rec);
+              } else if (typeof out.revised_prompt === "string") {
+                images[idx]!.revisedPrompt = out.revised_prompt;
+              }
+            }
+            if (typeof out.revised_prompt === "string") {
+              lastRevisedPrompt = out.revised_prompt;
+            }
+          }
+        }
+      } else if (evtType === "response.failed" || evtType === "error") {
+        const e = event as { error?: { message?: string }; message?: string };
+        const message =
+          typeof e?.error?.message === "string"
+            ? e.error.message
+            : typeof e?.message === "string"
+            ? e.message
+            : "OpenAI stream error";
+        yield { type: "error", message };
+        return;
+      }
+    }
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Unknown streaming error";
+    yield { type: "error", message };
+    return;
+  }
+
+  const completeEvent: MultiToolEvent = {
+    type: "complete",
+    images,
+    searchResults,
+    responseId,
+    revisedPrompt: lastRevisedPrompt,
+  };
+  if (imageCallId) {
+    (completeEvent as { imageCallId?: string }).imageCallId = imageCallId;
+  }
+  yield completeEvent;
+}
+
 export async function POST(req: NextRequest) {
   let payload: RequestPayload;
   try {
@@ -205,6 +477,261 @@ export async function POST(req: NextRequest) {
       const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
       try {
+        // =========================================================
+        // Analyze & Improve: image input + image_generation (edit action)
+        // =========================================================
+        if (isAnalyzeImprove(payload)) {
+          send("progress", { step: "Loading reference", progress: 5 });
+
+          let refImageUrl: string | undefined = payload.imageUrl;
+          let parentThumbnailId: string | undefined;
+          let parentPrompt: string | undefined;
+
+          if (!refImageUrl && payload.thumbnailId) {
+            const { data: parent, error: parentErr } = await supabase
+              .from("thumbnails")
+              .select("id, link, prompt")
+              .eq("id", payload.thumbnailId)
+              .single();
+            if (parentErr || !parent) throw new Error("Reference thumbnail not found");
+            refImageUrl = parent.link as string;
+            parentThumbnailId = parent.id as string;
+            parentPrompt = (parent.prompt as string) ?? undefined;
+          }
+          if (!refImageUrl) throw new Error("Provide either imageUrl or thumbnailId");
+
+          const instruction =
+            payload.instruction?.trim() ||
+            `Analyze this thumbnail and create an improved version. Identify the dominant subject, color palette, lighting style, and composition. Then regenerate a sharper, higher-impact version that keeps the same subject and mood but improves clarity, contrast, and overall thumbnail punch.${parentPrompt ? ` Original concept: ${parentPrompt}` : ""}`;
+
+          const optsForAnalyze: GenerationOptions = payload.options ?? {};
+          const imageGenTool: Record<string, unknown> = {
+            type: "image_generation",
+            action: "edit",
+            partial_images: 2,
+          };
+          if (optsForAnalyze.size && optsForAnalyze.size !== "auto") imageGenTool.size = optsForAnalyze.size;
+          if (optsForAnalyze.quality && optsForAnalyze.quality !== "auto") imageGenTool.quality = optsForAnalyze.quality;
+          if (optsForAnalyze.format) imageGenTool.format = optsForAnalyze.format;
+
+          const analyzeTools: Array<Record<string, unknown>> = [imageGenTool];
+
+          send("progress", { step: "Analyzing and improving", progress: 25 });
+
+          let finalBase64: string | undefined;
+          let revisedPrompt: string | undefined;
+          let responseId: string | undefined;
+          let imageCallId: string | undefined;
+
+          for await (const evt of streamMultiTool(openai, {
+            prompt: instruction,
+            imageInputs: [refImageUrl],
+            tools: analyzeTools,
+            model: "gpt-5.5",
+            options: optsForAnalyze,
+            toolChoice: { type: "image_generation" } as unknown as OpenAI.Responses.ResponseCreateParams["tool_choice"],
+          })) {
+            if (evt.type === "tool-start") {
+              send("tool-start", { tool: evt.tool });
+            } else if (evt.type === "partial") {
+              send("partial", { index: evt.index, base64: evt.base64 });
+            } else if (evt.type === "image-complete") {
+              if (evt.result) finalBase64 = evt.result;
+              if (evt.revisedPrompt) revisedPrompt = evt.revisedPrompt;
+              if (evt.imageCallId) imageCallId = evt.imageCallId;
+            } else if (evt.type === "complete") {
+              if (evt.responseId) responseId = evt.responseId;
+              if (evt.imageCallId) imageCallId = evt.imageCallId;
+              if (evt.revisedPrompt) revisedPrompt = evt.revisedPrompt;
+              const first = evt.images[0];
+              if (first?.base64) finalBase64 = first.base64;
+            } else if (evt.type === "error") {
+              throw new Error(evt.message);
+            }
+          }
+
+          if (!finalBase64) throw new Error("Analyze-and-improve returned no image");
+
+          send("progress", { step: "Saving to storage", progress: 88 });
+
+          const buffer = Buffer.from(finalBase64, "base64");
+          const fmt: "png" | "jpeg" | "webp" = optsForAnalyze.format ?? "png";
+          const ext = fmt === "jpeg" ? "jpg" : fmt === "webp" ? "webp" : "png";
+          const contentType =
+            ext === "jpg" ? "image/jpeg" : ext === "webp" ? "image/webp" : "image/png";
+          const key = `thumbnails/improvements/${Date.now()}-${Math.floor(Math.random() * 1000)}.${ext}`;
+          const { error: upErr } = await supabase.storage
+            .from("thumbnails")
+            .upload(key, buffer, { contentType });
+          if (upErr) throw new Error(`Upload failed: ${upErr.message}`);
+          const { data: pub } = supabase.storage.from("thumbnails").getPublicUrl(key);
+          const finalImageUrl = pub.publicUrl;
+
+          const isPublic = typeof payload.isPublic === "boolean" ? payload.isPublic : true;
+          const { data: inserted } = await supabase
+            .from("thumbnails")
+            .insert({
+              link: finalImageUrl,
+              prompt: instruction,
+              revised_prompt: revisedPrompt ?? null,
+              isPublic,
+              openai_response_id: responseId ?? null,
+              openai_image_call_id: imageCallId ?? null,
+              parent_id: parentThumbnailId ?? null,
+              mode: "analyze-and-improve",
+              size: optsForAnalyze.size ?? "1536x1024",
+              quality: optsForAnalyze.quality ?? "high",
+              format: fmt,
+            })
+            .select("id")
+            .single();
+
+          send("complete", {
+            step: "Improvement ready",
+            progress: 100,
+            imageUrl: finalImageUrl,
+            thumbnailId: inserted?.id ?? null,
+            revisedPrompt: revisedPrompt ?? null,
+          });
+          controller.close();
+          return;
+        }
+
+        // =========================================================
+        // Research: web_search + image_generation (gpt-5.5, streamed)
+        // =========================================================
+        if (isResearch(payload)) {
+          const basicPrompt = payload.basicPrompt?.trim();
+          if (!basicPrompt) throw new Error("Prompt is required");
+
+          const optsForResearch: GenerationOptions = payload.options ?? {};
+          const ctx = payload.searchContext?.trim();
+          const instruction = ctx
+            ? `${basicPrompt}\n\nResearch focus: ${ctx}. Use the web search to ground the image in real, current, factual details (trends, places, products, terminology, faces, objects) relevant to the topic. Then generate a thumbnail that visually represents these real-world references.`
+            : `${basicPrompt}\n\nUse web search to gather current, real-world context (trends, places, products, factual references) that would make this thumbnail more accurate and impactful, then generate a thumbnail grounded in that research.`;
+
+          const imageGenTool: Record<string, unknown> = {
+            type: "image_generation",
+            action: "generate",
+            partial_images: 2,
+          };
+          if (optsForResearch.size && optsForResearch.size !== "auto") imageGenTool.size = optsForResearch.size;
+          if (optsForResearch.quality && optsForResearch.quality !== "auto") imageGenTool.quality = optsForResearch.quality;
+          if (optsForResearch.format) imageGenTool.format = optsForResearch.format;
+          if (optsForResearch.background && optsForResearch.background !== "auto")
+            imageGenTool.background = optsForResearch.background;
+
+          const researchTools: Array<Record<string, unknown>> = [
+            { type: "web_search" },
+            imageGenTool,
+          ];
+
+          send("progress", { step: "Researching and generating", progress: 15 });
+
+          const collectedSearchResults: Array<{ url?: string; title?: string; snippet?: string }> = [];
+          let finalBase64: string | undefined;
+          let revisedPrompt: string | undefined;
+          let responseId: string | undefined;
+          let imageCallId: string | undefined;
+          let lastProgress = 15;
+
+          for await (const evt of streamMultiTool(openai, {
+            prompt: instruction,
+            tools: researchTools,
+            model: "gpt-5.5",
+            options: optsForResearch,
+          })) {
+            if (evt.type === "tool-start") {
+              send("tool-start", { tool: evt.tool });
+            } else if (evt.type === "searching") {
+              if (lastProgress < 25) {
+                lastProgress = 25;
+                send("progress", { step: "Searching the web", progress: lastProgress });
+              }
+            } else if (evt.type === "search-complete") {
+              if (lastProgress < 35) {
+                lastProgress = 35;
+                send("progress", { step: "Search complete", progress: lastProgress });
+              }
+            } else if (evt.type === "search-result") {
+              collectedSearchResults.push({
+                url: evt.url,
+                title: evt.title,
+                snippet: evt.snippet,
+              });
+              send("search-result", { url: evt.url, title: evt.title, snippet: evt.snippet });
+            } else if (evt.type === "partial") {
+              if (lastProgress < 70) {
+                lastProgress = 70;
+                send("progress", { step: "Generating image", progress: lastProgress });
+              }
+              send("partial", { index: evt.index, base64: evt.base64 });
+            } else if (evt.type === "image-complete") {
+              if (evt.result) finalBase64 = evt.result;
+              if (evt.revisedPrompt) revisedPrompt = evt.revisedPrompt;
+              if (evt.imageCallId) imageCallId = evt.imageCallId;
+            } else if (evt.type === "complete") {
+              if (evt.responseId) responseId = evt.responseId;
+              if (evt.imageCallId) imageCallId = evt.imageCallId;
+              if (evt.revisedPrompt) revisedPrompt = evt.revisedPrompt;
+              for (const r of evt.searchResults) collectedSearchResults.push(r);
+              const first = evt.images[0];
+              if (first?.base64) finalBase64 = first.base64;
+              if (first?.revisedPrompt) revisedPrompt = first.revisedPrompt;
+            } else if (evt.type === "error") {
+              throw new Error(evt.message);
+            }
+          }
+
+          if (!finalBase64) throw new Error("Research returned no image");
+
+          send("progress", { step: "Saving to storage", progress: 88 });
+
+          const buffer = Buffer.from(finalBase64, "base64");
+          const fmt: "png" | "jpeg" | "webp" = optsForResearch.format ?? "png";
+          const ext = fmt === "jpeg" ? "jpg" : fmt === "webp" ? "webp" : "png";
+          const contentType =
+            ext === "jpg" ? "image/jpeg" : ext === "webp" ? "image/webp" : "image/png";
+          const key = `thumbnails/research/${Date.now()}-${Math.floor(Math.random() * 1000)}.${ext}`;
+          const { error: upErr } = await supabase.storage
+            .from("thumbnails")
+            .upload(key, buffer, { contentType });
+          if (upErr) throw new Error(`Upload failed: ${upErr.message}`);
+          const { data: pub } = supabase.storage.from("thumbnails").getPublicUrl(key);
+          const finalImageUrl = pub.publicUrl;
+
+          const isPublic = typeof payload.isPublic === "boolean" ? payload.isPublic : true;
+          const { data: inserted } = await supabase
+            .from("thumbnails")
+            .insert({
+              link: finalImageUrl,
+              prompt: basicPrompt,
+              revised_prompt: revisedPrompt ?? null,
+              isPublic,
+              openai_response_id: responseId ?? null,
+              openai_image_call_id: imageCallId ?? null,
+              mode: "research",
+              size: optsForResearch.size ?? "1536x1024",
+              quality: optsForResearch.quality ?? "medium",
+              format: fmt,
+              template: payload.templateSlug ?? null,
+              style: payload.styleSlug ?? null,
+            })
+            .select("id")
+            .single();
+
+          send("complete", {
+            step: "Research thumbnail ready",
+            progress: 100,
+            imageUrl: finalImageUrl,
+            thumbnailId: inserted?.id ?? null,
+            revisedPrompt: revisedPrompt ?? null,
+            searchResults: collectedSearchResults,
+          });
+          controller.close();
+          return;
+        }
+
         // =========================================================
         // Channel resize: parallel small image_generation calls per size
         // =========================================================
@@ -530,10 +1057,6 @@ export async function POST(req: NextRequest) {
 
           send("progress", { step: "Generating variants", progress: 10 });
 
-          // Build prompts that ask for multiple distinct variants in the response.
-          // We don't actually request N separate image_generation tool calls
-          // (the model only calls it once per response). Instead, we run N
-          // parallel responses.create calls each focused on a different angle.
           const variantPromises = variantAngles.map((angle, idx) => {
             const variantPrompt = `${basicPrompt}\n\nComposition focus: ${angle}.`;
             return streamOneVariant(openai, {
@@ -629,7 +1152,6 @@ export async function POST(req: NextRequest) {
             });
           }
 
-          // Best-effort critic on the first variant only (saves quota)
           let critic: Awaited<ReturnType<typeof criticThumbnail>> = null;
           try {
             const first = settled[0];
@@ -788,7 +1310,6 @@ export async function POST(req: NextRequest) {
 
         if (dbError) console.error("DB insert error:", dbError);
 
-        // Best-effort critic
         let critic = null;
         try {
           const c = await criticThumbnail({
