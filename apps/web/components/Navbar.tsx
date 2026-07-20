@@ -5,6 +5,7 @@ import { Sora } from "next/font/google";
 import { ModeToggle } from "./ModeToggle";
 import { Menu, X, Github } from "lucide-react";
 import Link from "next/link";
+import { SignUpButton } from "@clerk/nextjs";
 
 const sora = Sora({
   subsets: ["latin"],
@@ -57,12 +58,11 @@ function Navbar() {
 
           <div className="hidden md:flex items-center gap-3">
             <ModeToggle />
-            <Link
-              href="/app"
-              className="text-sm font-medium bg-red-600 hover:bg-red-700 text-white px-5 py-2 rounded-lg transition-colors"
-            >
-              Get Started
-            </Link>
+            <SignUpButton mode="modal" forceRedirectUrl="/app">
+              <button className="text-sm font-medium bg-red-600 hover:bg-red-700 text-white px-5 py-2 rounded-lg transition-colors">
+                Get Started
+              </button>
+            </SignUpButton>
           </div>
 
           <button
@@ -105,12 +105,11 @@ function Navbar() {
             </a>
             <div className="flex items-center justify-between pt-3 border-t border-border/50">
               <ModeToggle />
-              <Link
-                href="/app"
-                className="text-sm font-medium bg-red-600 text-white px-5 py-2 rounded-lg"
-              >
-                Get Started
-              </Link>
+              <SignUpButton mode="modal" forceRedirectUrl="/app">
+                <button className="text-sm font-medium bg-red-600 text-white px-5 py-2 rounded-lg">
+                  Get Started
+                </button>
+              </SignUpButton>
             </div>
           </div>
         )}

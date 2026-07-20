@@ -4,6 +4,7 @@ import { Sora } from "next/font/google";
 import Image from "next/image";
 import Link from "next/link";
 import { ArrowRight, Sparkles, Zap, Palette, Github } from "lucide-react";
+import { SignUpButton } from "@clerk/nextjs";
 import { MaxWidthWrapper } from "./MaxWidthWrapper";
 
 const sora = Sora({
@@ -387,16 +388,15 @@ export default function LandingPage({ thumbnailUrls = [] }: LandingPageProps) {
               variants={fadeUp}
               className="mt-7 sm:mt-10 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4"
             >
-              <Link
-                href="/app"
-                className="group inline-flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-medium px-7 py-3 sm:px-8 sm:py-3.5 rounded-xl transition-all duration-200 text-sm sm:text-base"
-              >
-                Get started free
-                <ArrowRight
-                  size={16}
-                  className="group-hover:translate-x-0.5 transition-transform"
-                />
-              </Link>
+              <SignUpButton mode="modal" forceRedirectUrl="/app">
+                <button className="group inline-flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white font-medium px-7 py-3 sm:px-8 sm:py-3.5 rounded-xl transition-all duration-200 text-sm sm:text-base">
+                  Get started free
+                  <ArrowRight
+                    size={16}
+                    className="group-hover:translate-x-0.5 transition-transform"
+                  />
+                </button>
+              </SignUpButton>
               <Link
                 href="/pricing"
                 className="text-sm text-muted-foreground hover:text-foreground transition-colors underline underline-offset-4 decoration-muted-foreground/30 hover:decoration-foreground/50"

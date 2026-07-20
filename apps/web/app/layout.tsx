@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Outfit } from "next/font/google";
+import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
 import { Providers } from "@/components/Providers";
 import { Toaster } from "sonner";
@@ -45,11 +46,13 @@ export default function RootLayout({
         )}
       </head>
       <body className={`${outfit.className} antialiased`}>
-        <NextTopLoader color="#DC2626" />
-        <Providers>
-          {children}
-          <Toaster />
-        </Providers>
+        <ClerkProvider>
+          <NextTopLoader color="#DC2626" />
+          <Providers>
+            {children}
+            <Toaster />
+          </Providers>
+        </ClerkProvider>
       </body>
     </html>
   );
