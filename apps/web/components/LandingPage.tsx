@@ -3,7 +3,7 @@ import { motion } from "motion/react";
 import { Sora } from "next/font/google";
 import Image from "next/image";
 import Link from "next/link";
-import { ArrowRight, Sparkles, Zap, Palette, Github } from "lucide-react";
+import { ArrowRight, Sparkles, Zap, Palette, Download } from "lucide-react";
 import { MaxWidthWrapper } from "./MaxWidthWrapper";
 
 const sora = Sora({
@@ -84,10 +84,10 @@ const features = [
       "If you can write a sentence, you can create a professional thumbnail. Seriously, it's that simple.",
   },
   {
-    icon: <Github className="w-5 h-5" />,
-    title: "Open Source",
+    icon: <Download className="w-5 h-5" />,
+    title: "HD Export",
     description:
-      "Fully transparent and community-driven. Inspect the code, self-host, or use our managed cloud.",
+      "Download crisp, high-resolution thumbnails ready for YouTube and every platform.",
   },
 ];
 
@@ -119,7 +119,7 @@ export default function LandingPage({ thumbnailUrls = [] }: LandingPageProps) {
                 className="inline-flex items-center gap-2 sm:gap-3 text-[0.65rem] sm:text-xs font-medium tracking-[0.15em] sm:tracking-[0.2em] uppercase text-red-500 mb-5 sm:mb-8"
               >
                 <span className="w-5 sm:w-8 h-px bg-red-500/60" />
-                Open-Source &amp; AI-Powered
+                AI-Powered
                 <span className="w-5 sm:w-8 h-px bg-red-500/60" />
               </motion.div>
 
@@ -138,7 +138,7 @@ export default function LandingPage({ thumbnailUrls = [] }: LandingPageProps) {
               >
                 Type what your video is about. Get click-worthy,
                 studio-quality thumbnails in seconds — no design tools, no
-                templates, no creative block. Free and open-source.
+                templates, no creative block. Free to use.
               </motion.p>
 
               <motion.div
